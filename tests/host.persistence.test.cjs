@@ -2,7 +2,7 @@
  * dsh-dream-skin — host-half persistence tests.
  *
  * Loads lib/index.js (ESM) via dynamic import, mounts its `apply(ctx)` with a
- * fake webServer/webRuntime, captures the registered route handler, and drives
+ * fake webServer/webStartup, captures the registered route handler, and drives
  * it with mocked req/res objects against a throwaway DSH_HOME directory. Covers
  * the fenced JSON API contract: get/set/merge/null-clear, method errors,
  * content-type fence, size cap (413), trust fence (403), and unknown method.
@@ -47,7 +47,11 @@ function makeRes() {
 function makeHarness(overrides = {}) {
 	let captured = null;
 	const ctx = {
-		webRuntime: { trustedHosts: overrides.trustedHosts || [] },
+		get(name) {
+			if (name === 'webStartup') return overrides.noStartup ? undefined : { trustedHosts: overrides.trustedHosts || [] };
+			if (name === 'webRuntime') return overrides.legacy ? { trustedHosts: ['evil.example'] } : undefined;
+			return undefined;
+		},
 		webServer: { register(route) { captured = route; return () => {}; } },
 		effect(fn) { fn(); }
 	};
@@ -106,6 +110,21 @@ test('registers a prefix route and applies trusted-host config', async (t) => {
 	// handler mounted; a non-loopback, non-trusted host gets 403
 	const res = await harness.run({ headers: { 'content-type': 'application/json', host: 'evil.example' }, body: '{"method":"get"}' });
 	assert.equal(res.status, 403, 'untrusted authority blocked');
+});
+
+test('Host contract accepts current webStartup authorities and fails closed when it is absent', async () => {
+	const skin = await loadIndex();
+	assert.deepEqual(skin.inject, ['webServer']);
+	const remote = makeHarness({ trustedHosts: ['trusted.example'] });
+	skin.apply(remote.ctx);
+	const accepted = await remote.run({ headers: { ...J, host: 'trusted.example', origin: 'http://trusted.example' }, body: '{"method":"get"}' });
+	assert.equal(accepted.status, 200);
+	const denied = await remote.run({ headers: { ...J, host: 'evil.example' }, body: '{"method":"get"}' });
+	assert.equal(denied.status, 403);
+	const absent = makeHarness({ noStartup: true, legacy: true });
+	skin.apply(absent.ctx);
+	const oldGrant = await absent.run({ headers: { ...J, host: 'evil.example' }, body: '{"method":"get"}' });
+	assert.equal(oldGrant.status, 403, 'retired webRuntime cannot authorize a remote origin');
 });
 
 test('rejects non-JSON content-type with 415', async (t) => {
