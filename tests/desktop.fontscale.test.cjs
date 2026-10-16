@@ -1,11 +1,15 @@
 /**
- * dsh-dream-skin — THE CONVERSATION FONT-SIZE RANGE (issue #93).
+ * dsh-dream-skin — THE CONVERSATION FONT-SIZE RANGE (issue #93, wording gate #107).
  *
  * The host's conversation-text stepper went from `12–17 px` to `10–22 px` in
  * **0.2.0-rc.2** — that is `latest`, so new installs already run in the wider
  * range — while every readability conclusion this repo has ever published was
- * measured at the **14 px default**. The two new extremes (10 px and 22 px)
- * have had **zero** samples.
+ * measured at the **14 px default**. The two new extremes are reported in two
+ * halves, and keeping those halves honest is what this file is for: COMPUTED
+ * STYLES at 10 / 22 px have been sampled (2026-10-09, in an isolated fixture
+ * page, host install untouched — `scripts/data/font-extreme-samples.json`);
+ * the LIVE PAGE and the PIXELS at either extreme have been observed **zero**
+ * times.
  *
  * What this file can and cannot do, stated up front so nobody reads more into
  * a green run than is there:
@@ -15,14 +19,19 @@
  *   host's own "small text and code keep fixed sizes" carve-out, and must not
  *   be replaced by a claim that the extremes were measured.
  *
+ *   CAN — hold the two halves APART (#107). A never-sampled phrase may not sit
+ *   in the same document as "computed styles sampled" unless it says WHICH
+ *   half it means; after 715986f the doc shipped with both, in different
+ *   sections, so a reader's conclusion depended on which one they opened first.
+ *
  *   CAN — hold the BEHAVIOUR that makes the claim true: we never write the
  *   host's font ladder (`--dsh-content-font*`), and every `fontSize` literal in
  *   the bundle is a plugin-UI constant at or below the 14 px default.
  *
- *   CANNOT — sample 10 px or 22 px. That needs a live page in a sacrificial
- *   install; upgrading the machine's own install is out of bounds, so this
- *   gate pins the admission rather than the observation. The observation stays
- *   manual.
+ *   CANNOT — look at a real page at 10 px or 22 px. That needs a live page in a
+ *   sacrificial install; upgrading the machine's own install is out of bounds,
+ *   so this gate pins the admission rather than the observation. The observation
+ *   stays manual.
  *
  * The host facts are frozen in `tests/fixtures/host_font_scale.json`, read out
  * of the real npm tarballs of `@deepseek-ai/dsh-client-ui-theme` (rc.1 / rc.2 /
@@ -57,6 +66,14 @@ const CLAIM_DOCS = [
 	"docs/desktop-support.md"
 ];
 
+/** Lines matching `re`, with their 1-based numbers — a wording gate that does not
+ *  name the line it is complaining about is a gate the reader cannot act on. */
+function numberedLines(text, re) {
+	return String(text).split("\n")
+		.map((line, i) => ({ number: i + 1, line }))
+		.filter((entry) => re.test(norm(entry.line)));
+}
+
 /**
  * Fold the typographic dashes and relations the host README uses (−, ≤, –)
  * onto their ASCII spellings so a needle can be built from the fixture instead
@@ -88,9 +105,14 @@ const FALSE_COMPLETION = [
 /** The disclaimer the narrowed phrasing must carry. */
 const DISCLAIMER = "在宿主字号 10–22 区间内的默认值 14 px 下实测，极值未测";
 
-/** The dated bullet that has to survive in the unverified list. */
-const DATED_ENTRY = "会话字号极值：两条分开记，各零次实测";
-const DATE_RE = /记录日期 (\d{4}-\d{2}-\d{2})/;
+/** The dated bullet that has to survive in the unverified list. Phase 2
+ * (2026-10-09) added machine-read computed-style extremes at the font-size
+ * bounds (`scripts/data/font-extreme-samples.json`, taken in a real engine
+ * with the host install untouched), so the admission now splits: SAMPLED
+ * (computed styles) vs UNOBSERVED (live page / pixels). */
+const DATED_ENTRY = "会话字号极值：计算样式已采样，真机活页与像素观感未验";
+const DATE_RE = /采样日期 (\d{4}-\d{2}-\d{2})/;
+const SAMPLES_FILE = "scripts/data/font-extreme-samples.json";
 
 /** A doc that states the host range obliges the disclaimer. */
 const RANGE_MENTION = /10[-]22|10 (?:to|through) 22/;
@@ -238,6 +260,26 @@ function checkFontScale({ doc, fixture, bundle, docs }) {
 		else findings.push(`font-extreme entry dated ${m[1]}`);
 	}
 
+	// ── issue #107: the two halves of the #93 admission must not contradict ───
+	// "the extremes were never sampled" and "the computed styles were sampled"
+	// can BOTH be true — of different halves (pixels vs computed styles). They are
+	// not true of one document that says nothing about which half it means: the
+	// file shipped that way after 715986f, so a reader who opened §字号 first got
+	// "零次实测" and a reader who opened the unverified list got "已采样". The gate
+	// therefore requires that if an absolute never-sampled phrase is present, the
+	// sentence carrying it must ALSO name the half it is about.
+	const ZERO_SAMPLE = /零次(?:实测|采样)/;
+	const SAMPLED = /计算样式已采样/;
+	const halfNames = /真机|活页|目视|观感|像素|live|pixel|visual/i;
+	const zeroLines = numberedLines(doc, ZERO_SAMPLE);
+	if (zeroLines.length && docN.match(SAMPLED)) {
+		for (const entry of zeroLines) {
+			if (!halfNames.test(entry.line)) {
+				problems.push(`#107: line ${entry.number} says the extremes were sampled 零次 while the same file says 计算样式已采样 (line ${numberedLines(doc, SAMPLED).map((l) => l.number).join(",")}) — name which half the never-sampled sentence means (真机目视 / 计算样式)`);
+			}
+		}
+	}
+
 	for (const banned of FALSE_COMPLETION) {
 		if (banned.test(docN)) problems.push(`the evidence doc claims a completed measurement the issue says does not exist: ${banned}`);
 	}
@@ -295,7 +337,7 @@ function checkFontScale({ doc, fixture, bundle, docs }) {
 		problems.push("a raw font-size declaration appeared in the bundle — font sizing belongs to the host ladder, not to this plugin");
 	}
 
-	findings.push(`host range ${oldRange} px (rc.1) -> ${latestRange} px (rc.2 = latest), default ${rc2.default} px, 0 samples at either extreme`);
+	findings.push(`host range ${oldRange} px (rc.1) -> ${latestRange} px (rc.2 = latest), default ${rc2.default} px, 0 live-page observations at either extreme (computed-style samples: see ${SAMPLES_FILE})`);
 	return { problems, findings };
 }
 
@@ -311,7 +353,8 @@ const base = () => ({ doc, fixture, bundle, docs });
 test("desktop font scale (#93): the live evidence doc and bundle pass the gate", () => {
 	const { problems, findings } = checkFontScale(base());
 	assert.deepStrictEqual(problems, [], problems.join("\n"));
-	assert.ok(findings.some((f) => /0 samples at either extreme/.test(f)), "the gate must report that neither extreme was sampled");
+	assert.ok(findings.some((f) => /0 live-page observations at either extreme/.test(f)),
+		"the gate must report that the live page at either extreme was never observed");
 });
 
 test("desktop font scale (#93): the frozen host reading is internally consistent", () => {
@@ -456,12 +499,12 @@ test("mutation #93.8 — an unreadable or emptied document must not look like a 
 
 test("mutation #93.9 — an undated admission reddens the gate", () => {
 	const broken = base();
-	broken.doc = broken.doc.replace(/记录日期 \d{4}-\d{2}-\d{2}/, "记录日期待定");
+	broken.doc = broken.doc.replace(/采样日期 \d{4}-\d{2}-\d{2}/, "采样日期待定");
 	const { problems } = checkFontScale(broken);
 	assert.ok(problems.some((p) => p.includes("carries no date")), problems.join("\n"));
 	// Control: a different but still well-formed date keeps it green.
 	const control = base();
-	control.doc = control.doc.replace(/记录日期 \d{4}-\d{2}-\d{2}/, "记录日期 2026-11-01");
+	control.doc = control.doc.replace(/采样日期 \d{4}-\d{2}-\d{2}/, "采样日期 2026-11-01");
 	assert.deepStrictEqual(checkFontScale(control).problems, []);
 });
 
@@ -470,4 +513,39 @@ test("mutation #93.10 — misattributing the widening to the wrong host version 
 	broken.doc = broken.doc.replaceAll("0.2.0-rc.2", "0.2.1-alpha.1");
 	const { problems } = checkFontScale(broken);
 	assert.ok(problems.some((p) => p.includes("does not name 0.2.0-rc.2")), problems.join("\n"));
+});
+
+test("mutation #107.1 — a never-sampled sentence that does not say WHICH half contradicts the sampled one", () => {
+	// This is literally what 715986f shipped: §字号 said "10 px / 22 px 各零次实测"
+	// while the unverified list said 计算样式已采样. Both sentences were true of a
+	// different half, neither said so, and the doc was shipped to npm that way.
+	const reintroduced = base();
+	reintroduced.doc = reintroduced.doc.replace(
+		"**另一半仍未验**：",
+		"**另一半仍未验**：`10 px / 22 px` 各零次实测，既不是推测读不出来，也不是已验证。\n\n"
+	);
+	const { problems } = checkFontScale(reintroduced);
+	assert.ok(problems.some((p) => p.includes("#107") && p.includes("零次")),
+		`the contradiction must be named with its line, saw:\n${problems.join("\n")}`);
+
+	// Control (the part that makes this a gate and not a keyword ban): the SAME
+	// never-sampled phrase, now saying which half it means, must stay green.
+	const qualified = base();
+	qualified.doc = qualified.doc.replace(
+		"**另一半仍未验**：",
+		"**另一半仍未验**：真机目视下 `10 px / 22 px` 各零次实测。\n\n"
+	);
+	assert.deepStrictEqual(checkFontScale(qualified).problems, [],
+		"a sentence that names its half is not a contradiction");
+});
+
+test("mutation #107.2 — deleting the sampled admission does NOT make the contradiction legal", () => {
+	// The rule is "if both are present, say which half". Removing the sampled line
+	// would silence the gate by destroying the newer, better evidence — so the
+	// DATED_ENTRY check has to catch that on its own, and the pair must never be
+	// able to cancel each other out.
+	const lost = base();
+	lost.doc = lost.doc.replace(/会话字号极值：计算样式已采样/, "会话字号极值：未验");
+	const { problems } = checkFontScale(lost);
+	assert.ok(problems.some((p) => p.includes("dated font-extreme entry")), problems.join("\n"));
 });

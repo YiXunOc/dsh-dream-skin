@@ -72,7 +72,7 @@ Les deux voies sont superposables et indépendantes : un preset décide du « ma
   </tr>
 </table>
 
-> Clair / sombre : `mist`, `ivory` et `rose` sont des thèmes clairs, les autres sont sombres. Les presets ne vous plaisent pas ? Poursuivez avec la **Voie n°2**. Chaque preset embarque ses propres réglages par défaut (opacité/flou du halo, transparence de la barre latérale et du composer, opacité des dialogues, matériau verre) : changer de thème réajuste toutes les valeurs que vous n’avez pas définies vous-même, et les 8 presets passent 228 contrôles qualité mesurables (217 palette + 11 métier) (échelle d’élévation OKLCH, contraste WCAG 2.1 + APCA, séparation des teintes de signal, distinction entre presets).
+> Clair / sombre : `mist`, `ivory` et `rose` sont des thèmes clairs, les autres sont sombres. Les presets ne vous plaisent pas ? Poursuivez avec la **Voie n°2**. Chaque preset embarque ses propres réglages par défaut (opacité/flou du halo, transparence de la barre latérale et du composer, opacité des dialogues, matériau verre) : changer de thème réajuste toutes les valeurs que vous n’avez pas définies vous-même, et les 8 presets passent 229 contrôles qualité mesurables (217 palette + 12 métier) (échelle d’élévation OKLCH, contraste WCAG 2.1 + APCA, séparation des teintes de signal, distinction entre presets).
 
 ---
 
@@ -196,6 +196,9 @@ dsh web
 ```
 
 > Installe le package npm publié — aucun clonage. Si `dsh plugin add` signale une erreur de workspace, ajoutez `-w`.
+> Écrivez le numéro de version en dur dans deux cas de figure (`npm view dsh-dream-skin version` le donne sur le champ) : **dans les 24 h qui suivent
+> une publication** (le délai de refroidissement de pnpm installe silencieusement une mouture plus ancienne) et **pour un vieux profil hérité de la 9.x**
+> (`^9.29.0` n'atteint jamais 10.x) — voir ci-dessous « Installation » et « Mise à jour ».
 
 ## 📦 Installation
 
@@ -207,6 +210,10 @@ persistées sur disque et se récupèrent après le redémarrage).
 ```sh
 dsh plugin --profile web add dsh-dream-skin
 ```
+
+> **Dans les 24 h qui suivent une publication, écrivez la version en dur** : `dsh plugin --profile web add dsh-dream-skin@<dernière version>`
+> (le numéro se consulte sur le champ avec `npm view dsh-dream-skin version`). Pour le Desktop, c'est un autre monde : son profil est géré
+> **exclusivement par l'application Electron**, et la CLI le refuse sèchement — le chemin qui fonctionne est décrit dans [docs/desktop-support.md](../desktop-support.md).
 
 ### Option B : Depuis GitHub (épinglé sur un commit vérifié)
 
@@ -262,6 +269,17 @@ dsh web   # restart to pick it up
 > release fraîchement publiée. Dans le répertoire du profil, exécutez :
 > `pnpm add dsh-dream-skin@latest --config.minimumReleaseAge=0` pour forcer.
 
+> **Sur un vieux profil, faites un `add` avec la version écrite et ne comptez pas sur `update`** : `update` réutilise le **range de dépendance déjà
+> présent dans `package.json`**, et un `dsh-dream-skin: ^9.29.0` écrit à l'époque de la 9.x ne couvre jamais 10.x selon semver (un caret ne flotte
+> qu'à l'intérieur de la même version majeure) — `update` annonce « déjà à jour » pendant que l'interface reste ancienne. Pour réécrire cette dépendance :
+>
+> ```sh
+> dsh plugin --profile web add dsh-dream-skin@<dernière version>   # npm view dsh-dream-skin version donne le numéro sur le champ
+> ```
+>
+> Ce n'est pas un nouveau défaut, c'est **un vieux correctif qui n'est jamais arrivé** — pour diagnostiquer un « j'ai pourtant mis à jour et rien ne
+> change », vérifiez d'abord la version réellement installée ; les étapes sont dans [docs/publishing-to-npm.md](../publishing-to-npm.md), section 9.
+
 **Désinstallation :**
 
 ```sh
@@ -278,12 +296,15 @@ dsh web   # restores the official appearance
 | DeepSeek Harness (`dsh`) | **Un seul build pour deux générations d'hôte** : stable `0.1.0-rc.6` / `0.1.1-rc.x` (peerDependencies épinglées sur `^0.1.0-rc.6`) et DSH master (table de modules post-division). **Le skin a disparu après une mise à niveau de l'hôte alors que le plugin s'affiche comme installé ?** La fenêtre de peers a très probablement fait sauter tout le bundle — issue de secours : `dsh plugin allow-version dsh-dream-skin@<version> <version de runtime de l'hôte>` (une **dérogation explicite à vos propres risques** qui force une combinaison non testée — pas une pratique recommandée) ; diagnostic du symptôme et étapes complètes dans [docs/desktop-support.md](../desktop-support.md) |
 | Node.js | `>=18` |
 | Navigateur | Chromium / WebKit moderne (variables CSS natives & `matchMedia`) |
-| Bureau | **Shell DSH Desktop tiers :** adapté et vérifié sur matériel réel (issues #50/#51/#55). **DSH Desktop officiel :** les preuves soutiennent « **devrait charger** », pas « pris en charge » — elles reposent sur deux faits statiques (même front-end Electron ; le `dsh.client.platform = "web"` que nous déclarons correspond aux 21 paquets clients livrés par l'hôte). Son répertoire de profil et sa commande d'installation n'ont **jamais** été vérifiés sur cette machine, donc ce document ne donne **aucune** commande d'installation bureau à copier. <!-- desktop-claim: load-expected-unverified -->Lors de l'ajout, la valeur de `--profile` doit être un nom de modèle que l'hôte **fournit lui-même** ; le profil qu'enseignent certains documents tiers n'y existe pas, et le copier installe dans un profil vide (après redémarrage, on ne voit rien). Preuves dans **[docs/desktop-support.md](../desktop-support.md)** → « bureau officiel : points à vérifier ». Liste complète des ancres / périmètre de sécurité / matrice vérifié-non vérifié : ce même document |
+| Bureau | **Shell DSH Desktop tiers :** adapté et vérifié sur matériel réel (issues #50/#51/#55). **DSH Desktop officiel :** les preuves soutiennent « **devrait charger** », pas « pris en charge » — elles reposent sur deux faits statiques (même front-end Electron ; le `dsh.client.platform = "web"` que nous déclarons correspond aux 21 paquets clients livrés par l'hôte). Son répertoire de profil et le fait que le shell charge ce plug-in ont été observés sur cette machine (installé dans `~/.dsh/profiles/desktop`, chargé après un redémarrage lancé par l'utilisateur, notre feuille de styles lue sur la page vivante : voir `docs/publishing-to-npm.md` 8.4 et `docs/desktop-support.md`), mais les réglages conservés d'un redémarrage à l'autre n'ont **jamais** été vérifiés sur cette machine, donc ce document ne donne **aucune** commande d'installation bureau à copier. <!-- desktop-claim: load-expected-unverified -->Lors de l'ajout, la valeur de `--profile` doit être un nom de modèle que l'hôte **fournit lui-même** ; le profil qu'enseignent certains documents tiers n'y existe pas, et le copier installe dans un profil vide (après redémarrage, on ne voit rien). Preuves dans **[docs/desktop-support.md](../desktop-support.md)** → « bureau officiel : points à vérifier ». Liste complète des ancres / périmètre de sécurité / matrice vérifié-non vérifié : ce même document |
 
 > Lors d'une mise à jour de DSH, incrémentez les peerDependencies dans `package.json` en conséquence.
 
 ---
 
+
+<details>
+<summary><b>Fonctionnement / Persistance / Développer et étendre les thèmes (cliquer pour déplier)</b></summary>
 ## ⚙️ Comment ça marche
 
 Le système de thèmes de DSH est basé sur des tokens : la coque web embarque des design tokens `--dsw-*`, et `ThemeRuntime` permet aux plugins
@@ -351,6 +372,8 @@ seeds de plateforme (`react`, `react/jsx-runtime`, …) et des bundles client en
 - **Valider** : `npm test` (tests de fumée VM couvrant l'évaluation de la factory, `apply()`, et l'import/persistance des packs).
 - **Repeindre** : référencez les tokens `--dsw-alias-*` (contrat complet dans [`docs/themes-spec.md`](../../docs/themes-spec.md)).
 
+
+</details>
 ## 📌 Feuille de route
 
 > **Ce tableau ne liste que l'inachevé.** Ce qui est déjà livré se trouve dans la section Fonctionnalités ci-dessus et dans [CHANGELOG.md](../../CHANGELOG.md) — dupliquer le même inventaire à deux endroits finit toujours par diverger, et ce projet a déjà divergé une fois. Ce tableau traduit la feuille de route du `README.md` chinois, qui reste la référence.
@@ -361,44 +384,36 @@ seeds de plateforme (`react`, `react/jsx-runtime`, …) et des bundles client en
 *Motivation : mesuré sur `0.2.0-rc.1`, 4 des 6 groupes d'ancres de l'hôte ont dérivé — 3 re-tirages de hash confirmés, plus 1 (le groupe `lXshSW_*`) qui est du CSS hôte toujours présent, dont la surface n'est simplement pas montée (séparé en `notMounted` depuis 10.5.0) ; côté utilisateur, le ticket #62 ressemblait à « mes skins ont tous disparu du jour au lendemain ».*
 
 - [ ] **M** Abandonner les derniers noms de classe hachés de l'hôte : migrer les règles décoratives restantes (barre latérale / panneau de fichiers) vers nos propres marqueurs `data-dsh-dream-skin-*` — composer et nav-icon ont déjà prouvé que cette voie fonctionne
-      — acceptation : la sonde de dérive renvoie `drifted: [] && pending: false` sur 0.2.x
-- [ ] **S** Ancrer le « pré-test contre une rc de l'hôte » dans la publication : le jour d'une nouvelle rc, lancer une fois la table de compatibilité et un vrai chargement de profil
-- [ ] **M** Faire glisser la fenêtre peer jusqu'à `0.3.x` — **seulement après vérification** ; si elle reste fermée, écrire « non pris en charge » dans la documentation au lieu de laisser un saut silencieux
+      — acceptation : **les deux couches doivent passer** – ① la porte statique d'appariement `tests/host.frosthooks.test.cjs` est verte : toute règle misant encore sur un hash de construction de l'hôte porte une ancre sans hash dans le même sélecteur, et cette ancre est mesurée dans les octets livrés des deux canaux ; ② la sonde de dérive renvoie `drifted: [] && notMounted: [] && pending: false` sur 0.2.x. **10.13.0 sort `channelAbsent` du critère de réussite et ne le lit plus que comme un fait** : un critère que chaque absence peut satisfaire en « s'expliquant » est de la prose tenant lieu de preuve ; avec la porte statique, retirer une ancre vire au rouge sur-le-champ, tandis que « ce hash manque sur ce canal » reste écrit dans `anchors`. **Lire seulement `drifted` vide ne suffit toujours pas** (le `retired` de 10.8.0 et le `channelAbsent` de 10.12.1 déplacent des absences expliquées hors de `drifted`). Lecture : `docs/desktop-support.md`, section `消费判读`
+- [ ] **M** Faire glisser la fenêtre peer jusqu'à `0.3.x` — **bloquée en amont, pas de notre côté** : au 2026-10-10, sur le registry, le `latest` de `@deepseek-ai/dsh` est `0.2.0-rc.2` et la liste des versions s'arrête à `0.2.1-alpha.2` ; `0.3.x` n'a jamais été publié (`npm view @deepseek-ai/dsh versions --json`). Faute de version cible sur laquelle s'aligner, cette ligne ne peut être ni commencée ni vérifiée — la fenêtre peer actuelle, telle qu'énoncée dans le tableau de compatibilité ci-dessus, couvre déjà **chaque** version de l'hôte publiée à ce jour.
+      — critère d'acceptation : uniquement après que l'hôte publie vraiment 0.3.x, lancer `npm run host:preflight -- --profile-load` (ces deux moitiés sont aujourd'hui cette commande), et n'élargir la fenêtre qu'en cas de réussite ; si elle reste fermée, écrire « non pris en charge » dans la documentation au lieu de laisser un saut silencieux
 - [ ] **S** La sonde de dérive ne peut pas couvrir les surfaces montées à la demande : la carte de questions et la carte d'approbation n'entrent dans le DOM que lorsque la conversation pose réellement une question ; un échantillonnage au démarrage les signalerait donc comme dérivées en permanence — 10.5.0 les laisse volontairement hors de la sonde
       — critère d'acceptation : après une vraie question, `anchors` rapporte touché / raté pour les deux ancrages fonctionnels, tandis qu'une page fraîchement ouverte conserve `drifted: []`
-- [ ] **M** Faire passer la preuve de mécanisme dans la CI : la porte « styles calculés » (`npm run wash:check`) dépend du Chrome de la machine de maintenance et du CSS de l'hôte installé en local, donc ses quatre cas calculés sont sautés dans la CI — aujourd'hui une seule personne peut recalculer cette moitié de la preuve (« le mécanisme agit vraiment ») ; en passant, remplacer dans le fixture les noms de classes de l'hôte recopiés à la main par des ancres fournies par le DOM réel / le recensement `scripts/host-consumers.cjs`
-      — critère : les journaux de la CI affichent les **lectures** des quatre cas au lieu d'un motif de saut ; sans navigateur ou sans hôte, l'échec est un code non nul qui nomme ce qui manque, jamais un passage silencieux
 
 ### B. Publication et canal d'installation
 
 *Motivation : le 2026-09-29, des installations ont été refusées sur le Desktop officiel `0.2.0-rc.2` ; or la machine de maintenance est en installation `link:` workspace — **ce type de problème est invisible sous une installation link**.*
 
-- [ ] **S** Ajouter à la checklist de publication « installer vraiment une fois depuis le registry » (nouveau profil + version exacte + `--dump-config` pour contrôler l'entrée du loader) → l'écrire dans `docs/publishing-to-npm.md`
-- [ ] **S** Mettre la version exacte dans toute commande d'installation / mise à jour (trois endroits : README, skill, doc desktop) et expliquer le délai de 24 h de pnpm
 - [ ] **M** Documenter un chemin de distribution intranet / hors ligne (le mécanisme de tarball Release existe déjà ; les étapes copiables manquent) | PR-welcome
 
 ### C. Volet exploitation du Desktop
 
 *Motivation : depuis la sortie du Desktop officiel, un nouveau profil d'utilisateur apparaît — une personne qui gère une flotte de machines. Les contacts réels avec ce profil sont encore rares, donc on commence par les deux points les moins chers, sans tout couvrir d'un coup.*
 
-- [ ] **S** Ajouter un champ de version de schéma au fichier d'état (les montées de version reposent aujourd'hui sur une lecture tolérante ; aucun exercice de compatibilité ascendante n'a été fait)
-- [ ] **M** Une sortie lisible par machine pour « le skin est-il réellement appliqué » : guide de lecture champ par champ de `$DSH_HOME/dream-skin.json` et de `__DSH_DREAM_SKIN_STATUS__`, pour qu'un script tranche au lieu d'un humain ouvrant la console
 - [ ] **M** Guide de déploiement en série (arborescence des profils, différence entre installation `link:` et registry, sémantique des clés d'exemption de `compatibility.json`, ports dynamiques)
-- [ ] **L** Préconfiguration / distribution de politique (l'administrateur dépose un skin par défaut, actif au premier lancement) — placeholder, très probablement jamais fait
 
 ### D. Expérience produit
 
 *Motivation : c'est ce que l'utilisateur voit en premier. Mais les retours réels reçus ces deux jours (#61 / #62) portaient sur la fiabilité, pas sur l'expérience, donc tout ce groupe passe après A et B.*
 
 - [ ] **M** Premier rendu sans scintillement (FOUC) : **mesurer d'abord** — la fenêtre réelle entre la première image affichée et la fin de `apply()` décide de l'approche ; pas de mesure, pas de travaux
-- [ ] **S** Message d'état vide pour le fond d'écran par lien : quand « URL de l'image » est sélectionné sans lien collé, ce mode ne dessine aucun fond, et l'interface n'a pas la ligne qui explique « où est passé mon fond » (une ligne par langue sur les 8, à glisser dans la prochaine version fonctionnelle)
-- [ ] **S** Mesurer le quota `localStorage` : l'accumulation de l'historique des fonds d'écran peut-elle évincer silencieusement la persistance (un échec d'écriture est aujourd'hui **une dégradation silencieuse**)
 - [ ] **M** Galerie communautaire de thèmes — **figer les règles de gouvernance avant d'écrire du code**. Vérifié : un pack de thème ne contient aucun champ image (tokens + couleur d'accentuation + métadonnées seulement), les contributions ne portent donc structurellement aucun risque de droit d'auteur sur l'image ; tout le coût est dans la charge de relecture | PR-welcome
 
 ### E. On ne fera pas / PR seulement
 
 - **Rotation de plusieurs liens de fond d'écran** (observation annexe du ticket #61) : la solution serveur du rapporteur (une image aléatoire par requête + pré-composée au ratio de l'écran) obtient déjà le même effet, tandis que le faire dans le plugin est le changement le plus coûteux de ce tableau et le plus lourd en dette sémantique.
 - **Palette en ligne / Studio de prévisualisation de thèmes** : c'est un site autonome, pas une capacité du plugin, et cela recouvre la galerie communautaire de thèmes en plus cher.
+- **Préconfiguration / distribution de politique** (l'administrateur dépose un skin par défaut, actif dès le premier lancement — c'était le placeholder du groupe C, déplacé ici après l'arbitrage du 2026-10-10) : ce que cette ligne toucherait, c'est la **priorité d'écriture** de la persistance — la graine d'usine doit désormais s'effacer devant le fichier durable de l'utilisateur (la porte B1 de la 10.6.1 existe pour verrouiller exactement cela), et ajouter encore une couche « valeurs par défaut de l'administrateur » revient à glisser une quatrième source dans un comportement à trois états que les tests viennent seulement de verrouiller. Et le profil « une personne gère une flotte de machines » n'a toujours aucun contact réel, donc on ne le fait pas ; on le rouvrira quand des utilisateurs en flotte apparaîtront.
 - **Toute injection modifiant le paquet d'installation ou le binaire de l'hôte** : contradiction directe avec le positionnement « uniquement les points d'extension officiels » — **jamais**.
 
 ---

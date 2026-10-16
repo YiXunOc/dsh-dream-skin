@@ -52,6 +52,15 @@
  *                         neutralise both the paint and the mask path
  *                         (issue #97 — the previous rule's hash had measured 0
  *                         hits on the two hosts this release was built against)
+ *   side-foot-hash-free   EVERY rule naming a sidebar foot token (`_footArea` /
+ *                         `_settingsArea` / `_footerActions`), hash spelling
+ *                         included, must carry a hash-free (class-SUFFIX) branch,
+ *                         must scope the two nested surfaces under `_footArea`
+ *                         (`_footerActions` is shared with the question card), must
+ *                         number exactly two, and may only write alignment + erase.
+ *                         The old spelling pinned the plane to one host's build
+ *                         hash, which the official desktop shell does not share, so
+ *                         the fix had never run there (Roadmap A1)
  *
  * Scope, stated so it cannot quietly overstate itself (issue #77): the two
  * stylesheets this audit reads are the ones in REGISTERED_SHEETS — the material
@@ -614,7 +623,7 @@ const MODULES = [
  *    mask in its place — net box-neutral, but it necessarily writes a size.
  */
 const LAYOUT_ALLOWLIST = [
-	/hHd-Xa_(footArea|settingsArea|footerActions)/,
+	/\[class\$="_footArea"\]/,
 	/\[data-dsh-dream-skin-nav\]/
 ];
 
@@ -962,12 +971,27 @@ function auditCraft(source) {
 			// longhand leaves any `background-image` standing, and the flat colour this rule
 			// answers today is exactly the kind of declaration a future host upgrades to a
 			// gradient (issue #97 is that story already, on a different surface).
-			// The value is on the list, not "any colour that looks right": `transparent` leaves the
-			// wallpaper in the strip, `var(--dsw-alias-bg-base)` makes the strip follow the content
-			// column it spans (10.9.2 — the report on the first form came back as a screenshot). Both
-			// are tokens this repository can point at; a hardcoded hex/rgb here would be a fourth
-			// material on the chrome that no skin owns and no gate can trace.
-			const PAINT_VALUES = ['transparent !important', 'none !important', 'var(--dsw-alias-bg-base) !important'];
+			// The value is on the list, not "any colour that looks right": the `transparent` / `none`
+			// pair leaves the wallpaper in the strip, and the token forms make the strip follow the
+			// content column it spans. A hardcoded hex/rgb here would be a fourth material on the
+			// chrome that no skin owns and no gate can trace.
+			//
+			// TWO forms of the token are allowed, and that is deliberate. ONE layer was 10.9.2's answer
+			// and it shipped a band that still read light — the columns paint the canvas token three
+			// times (body + column + the app root inside it) while the strip can only stack what it is
+			// told to, so "same declaration as the column" is not "same pixel" (measured 2026-10-09:
+			// 0.640 vs 0.784 cumulative alpha). The two-layer form is the one that matches. This gate
+			// still accepts the single-layer form on purpose: craft grades the SHAPE (one declaration,
+			// the `background` shorthand, a token rather than an invented colour), and the engine decides
+			// whether the result looks like the surface under it. Moving the layer-count decision in
+			// here would put the same value in two gates, and 10.9.2 is the record of what happens when
+			// a shape gate carries a decision it cannot verify.
+			const PAINT_VALUES = [
+				'transparent !important',
+				'none !important',
+				'var(--dsw-alias-bg-base) !important',
+				'linear-gradient(var(--dsw-alias-bg-base), var(--dsw-alias-bg-base)) var(--dsw-alias-bg-base) !important'
+			];
 			if (!PAINT_VALUES.includes(d.value)) {
 				problems.push(`the caption row's paint is neither cleared nor following the canvas token, or is unarmed (got ${d.value}) — allowed: ${PAINT_VALUES.join(' / ')}`);
 			}
@@ -1027,6 +1051,65 @@ function auditCraft(source) {
 		push('wash-fade-neutralised', problems.length === 0,
 			problems.length ? problems.join('; ')
 				: 'the session-list foot fade is neutralised under a wash through both the paint and the mask path, anchored without a build hash');
+	}
+
+	// ---- 8. the sidebar foot plane cannot go back to a build hash ------------
+	// Roadmap A1. The same hole issue #97 found in the fade, on the other face that was
+	// still anchored on a hash: this sheet had `.hHd-Xa_root .hHd-Xa_footArea, …`. That
+	// hash is npm `0.2.0-rc.1`'s; the official desktop shell's host (`0.2.0-rc.2`) ships a
+	// DIFFERENT base for the same component (measured in its `app.asar`, and pinned against
+	// the installed corpus by `tests/host.sidefoot.test.cjs`), so the 「左侧栏底部断裂」
+	// alignment had never applied there. Grading only the hash-free spelling would recreate
+	// the exact blind spot: a sibling class-form rule would sit in the sheet ungazed.
+	{
+		const problems = [];
+		const FOOT = '[class$="_footArea"]';
+		const NESTED = ['[class$="_settingsArea"]', '[class$="_footerActions"]'];
+		// CANDIDATE SET: either spelling, so a hash-shaped sibling cannot hide.
+		const mentionsFoot = (sel) => sel.includes(FOOT) || /\.?[\w-]*_(footArea|settingsArea|footerActions)(?![\w-])/.test(sel);
+		const footRules = blocks.filter((b) => mentionsFoot(b.selector));
+		if (footRules.length !== 2) {
+			problems.push(`the sidebar foot plane is ${footRules.length} rule(s), expected exactly 2 (margin alignment + fill erase) — a third is a decision nobody took, a missing one is a dropped fix`);
+		}
+		for (const b of footRules) {
+			const branches = b.selector.split(',');
+			if (!branches.some((x) => x.includes(FOOT))) {
+				problems.push(`foot-plane rule has no hash-free branch (${b.selector.slice(0, 52)}) — a re-roll silently un-arms it, which is how A1's defect survived`);
+			}
+			for (const branch of branches) {
+				const s = branch.trim();
+				// `_footerActions` is genuinely SHARED: dsh-client-ui-user-questions draws
+				// `Mbwy4a_footerActions`, and the desktop shell's corpus has a second base for
+				// it too. Addressing the bare suffix would strip the question card's footer
+				// chrome — the issue-L1 shape (our rule painting somebody else's surface).
+				// `_settingsArea` is scoped for the same reason, not because it collides today.
+				for (const nested of NESTED) {
+					if (s.includes(nested) && !s.includes(FOOT)) {
+						problems.push(`branch "${s.slice(0, 48)}" addresses ${nested} without scoping it under ${FOOT} — that is a different component's footer`);
+					}
+				}
+				if (/\.?[\w-]+_(footArea|settingsArea|footerActions)(?![\w-])/.test(s)) {
+					problems.push(`branch "${s.slice(0, 48)}" still names a build hash for a sidebar surface — Roadmap A1 retired this spelling`);
+				}
+			}
+			for (const d of b.decls) {
+				// A WHITELIST of properties, because the 10.9.1 lesson was that banning a
+				// list of property NAMES only stops the names somebody thought of: a
+				// `transform: translateY(-34px)` walked straight through. Anything new here
+				// has to be decided, not absorbed.
+				if (!/^(width|margin-right|margin-left|padding-right|padding-left|background|box-shadow|border)$/.test(d.prop)) {
+					problems.push(`foot-plane rule writes ${d.prop}: ${d.value.slice(0, 32)} — not on the approved whitelist (alignment + erase only)`);
+				}
+				// The historical regression: blurring an ancestor of the settings modal broke
+				// fixed positioning. These surfaces host it.
+				if (/^(backdrop-filter|filter)$/.test(d.prop)) {
+					problems.push('the sidebar foot plane must never be a blur target (it hosts the settings modal)');
+				}
+			}
+		}
+		push('side-foot-hash-free', problems.length === 0,
+			problems.length ? problems.join('; ')
+				: 'the sidebar foot plane is anchored on the class SUFFIX (shared by every host hash), scoped so it cannot reach another component\'s footer, and writes only alignment + erase');
 	}
 
 	return { blocks, checks, css: extractCss(source), sheets };

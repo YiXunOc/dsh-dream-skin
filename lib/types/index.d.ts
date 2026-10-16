@@ -33,10 +33,8 @@ export interface DreamSkinHostContext {
       handler(req: unknown, res: unknown): Promise<void> | void;
     }): () => void;
   };
-  /** Bind-derived trust list sampled at boot (LAN literals + --trusted-host). */
-  webRuntime: {
-    trustedHosts: readonly string[];
-  };
+  /** Optional boot invocation authority; absent means loopback-only. */
+  get(name: "webStartup"): { trustedHosts: readonly string[] } | undefined;
   /** Register a disposer on the calling fiber. */
   effect(fn: () => (() => void) | void, label?: string): void;
 }

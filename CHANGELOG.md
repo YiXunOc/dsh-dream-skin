@@ -1,6 +1,790 @@
 # Changelog
 
 记录 `dsh-dream-skin` 的可观变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。从 `8.28.0` 起，版本号启用**日期式规则**：`M.D.X`（月.日.当日第几个版本），例如 8 月 28 日首个版本 `8.28.0`，当日再发 `8.28.1`，次日则为 `8.29.0`，以取代旧的 `0.4.x` 语义化版本（日期按维护者本地时区 UTC+8 计）。
+
+## [10.16.1] - 2026-10-16
+
+> dev-portable integration: upstream 10.16.0 plus the still-required webStartup trust fix for DSH 0.2.1-alpha.4. Local Linux npm suite and Cordis activation verified; native Windows Portable/profile load remains untested. 质量审计 **229 项质量门全过**（217 调色 + 12 工艺）。
+
+### 一、合并与兼容
+
+- Keep the host persistence route on webServer and read optional webStartup via ctx.get; never require retired webRuntime. Unknown service falls back to loopback-only.
+- Synchronize package, lockfile, and browser build version; add the trust regression and update declared suite counts.
+
+## [10.16.0] - 2026-10-16
+
+> **第三方目录那句"扫描器证明不了有限调用集"，本版把它变成一条能失败的门。** 合计 **229 项质量门全过**（217 调色 + 12 工艺，两池都不碰），全套 `npm test` 532→**538 全绿**。
+
+### 一、对方收回了什么，留下的又是什么
+
+外部目录 DSH STORE 在 `AI-Scarlett/DSH-Store#1411` 的追评（2026-10-15；原文与正文 sha256 已存档在 `docs/evidence/dsh-store-1411-followup-2026-10-15.md`，由新门重算核对）里**收回了自己 10.14.3 那条报告**：旧扫描器把"单文件上限"与"总量上限"混为一谈，`467,678 > 2,097,152` 那句自相矛盾一并作废；现行边界是 **4 MiB/文件、8 MiB/总量、512 源文件**，而"**Your 442,975-byte client needs no minification or splitting**"——这正是 10.14.3 量清楚后拒绝做的事，本轮由对方更正（`docs/publishing-to-npm.md` §十一 已就地标注，原文保留）。
+
+本版实测 `lib/client.js` 为 **443,779 字节**（对方扫描的那一份是 442,975，本版多出的 804 字节全是注释与说明行），在新边界下仍不到 4 MiB 的九分之一。
+
+同一条追评留下仍然开着的审查项：真实文件/网络能力，以及 `lib/client.js` 里 `requireSeed()` 的那枚 `require(name)`——原文是 "**the scanner does not prove its finite caller set**"。本版处理后者，并把前者的可审计面一并写成人能读、脚本能核对的形态。
+
+### 二、改了什么
+
+- **浏览器半边不再有"值"进入 `require`**（`requireSeed()`）：`requireSeed(name)` 改成 `requireSeed(load)`，helper 只接受零参 thunk，四枚平台 seed 的说明符全部写成**调用点上的字符串字面量**；原先那条 `for (const seed of [...])` 换成两条字面量语句——那个循环变量本身就是那条"值入参"车道。**行为逐处不变**：探测顺序仍是 jsx-runtime → react → master store → 稳定版 client，`null` 判据与 `seedProbe.lastError` 的覆盖次序一字未动，所以 `tests/client.smoke.test.cjs` 里那三条 seed 用例（#43 稳定版回退、无 seed 降级哑模块、缺 REACT 也降级）在本版**一行未改且仍绿**。改的是"能不能被审计"，不是"能不能加载"。
+- **可审计能力面进文档**（`docs/desktop-support.md` 新增「可审计能力面：浏览器半边能向宿主开口的一切」）：那张表就是"插件能向宿主开口的一切"的完整清单，且**不是手抄**——由新门与调用点双向核对。同节把另外两面定死：`fetch` 的调用点只接受常量 `HOST_API`，其值是**只有路径、没有协议与主机**的 `new URL("dream-skin/api", document.baseURI).pathname`；读写 `$DSH_HOME/dream-skin.json` 全部发生在宿主半边 `lib/index.js`。第三方图片目标（必应每日壁纸）是一枚**存下来的 URL**、由浏览器作为壁纸加载而非 `fetch`，默认关闭。
+
+### 三、门与账本
+
+- **回归门 541/541**（上一版 10.15.0 为 532），**质量审计 229/229**（217 调色 + 12 工艺，两池都不碰）：净 **+9** 全在新文件 `tests/client.audit_surface.test.cjs`。九条腿记为 L1…L9：
+  - **L1** 所有 `require(` 的实参必须是字符串字面量（外加模块 ID 形状校验，`..` 一类路径穿越直接被拒）；
+  - **L2** `requireSeed(` 的实参必须是零参 thunk（空白折叠后比对，防"格式化即假红"）；
+  - **L3** 文档表与调用点**同序双向核对**（多一行、少一枚、换顺序都红）；
+  - **L4** 每枚说明符必须被 `package.json` 的 `peerDependencies` 覆盖（第三把尺，独立数据源）；
+  - **L5** 真启动记录**实际问到**的说明符：master 代问到前三枚即止、稳定代多问回退枚，并集必须恰等于文档表；
+  - **L6** `fetch` 的实参只能是常量 `HOST_API`，且该常量的 URL spec 必须是**相对**字面量、末段等于 `lib/index.js` 之 `API_PREFIX`（对着宿主自己的常量核，不是抄一份）；
+  - **L7** 真启动记录 `fetch` 的目的地，在**有与无 `document.baseURI` 两种页面形态**下都必须是无 scheme、无 authority 的路径；
+  - **L8** 「页面侧能力矩阵」逐 token 现扫 `lib/client.js` 与文档**逐格双向比对**：代码冒出文档写"不存在"的 API ⇒ 红；文档写了代码没有的 ⇒ 红；代码用了而文档没列的 ⇒ 红；文档列出词汇表之外的 token ⇒ 红；
+  - **L9** 对方追评的**原文存档**必须与文件里写明的 sha256 相符，且凡声明"报告已收回/更正"的文档必须指向那份存档。
+  扫描类腿各带自守计数，防"扫描目标被改成空列表从而永远绿"（这条不是套话，是 F1 实测出来的，见 §四）。
+- `docs/desktop-support.md`：新增「可审计能力面：宿主模块说明符」与「页面侧能力矩阵」两节（23 个 token 的状态与边界）；兼容表与"已自动化验证"清单的套件读数 532→541，并写明本轮 +9 的构成。`README.md`：本版新闻条目。`docs/publishing-to-npm.md` §十一：就地更正标注 + 存档指针。`docs/evidence/dsh-store-1411-followup-2026-10-15.md`：**新增**，对方追评原文（未删未译）+ 来源与正文 sha256。`package.json` 的 `files` 白名单**点名加入那一份存档**（npm 安装后 `docs/desktop-support.md` 与 `docs/publishing-to-npm.md` 都随包发出去，引用不能是死链）——写的是单个文件路径而不是 `docs/evidence` 目录：目录形式实测会把 590 kB 的截图一起拖进来（`total files` 24 → 33、包体 443 → 920 kB），正是 issue #83 那轮反向做过的取舍；现在 24 → **25**、包体 444.8 kB，`L9` 有一条腿钉"这份存档必须在 `files` 里"。`package-lock.json` 随 `package.json` 一并置为 10.16.0。
+
+### 四、变异验证：15 次反向破坏 + 1 次门自守实验
+
+全部在隔离副本树（`.mut7`，工作文件不触碰）实跑，逐条打印翻红断言原文；腿号同 §三。
+
+| 破坏 | 翻红 | 读法 |
+|---|---|---|
+| **A1** 整体退回修复前的 `require(name)` | L1 L2 L3 L4 | **L5 绿**——退回形状不改变"实际问了哪些模块"，形状面与行为面看守的是两件事 |
+| **B1** helper 兼容两种入参、一个调用点退回传名字 | L1 L2 L3 L4 | L1 这次红在语义断言（"实参必须是字面量"）而非计数，A1 的噪声由此消掉 |
+| **C1** 文档表多写一行代码并不要求的 seed | L3 L5 | 承诺与代码不一致，两种读法各抓一半 |
+| **C2** 文档表调换探测顺序 | L3 L5 | 顺序是行为（master seed 在前），故 L5 也红 |
+| **D1** 去掉 `@deepseek-ai/dsh-client-store` 的 `peerDependencies` 声明 | **只 L4** | 清单与代码分叉的唯一哨兵 |
+| **E1** `HOST_API` 由 `.pathname` 改成 `.href`（带 origin 的绝对 URL） | L6 L7 | ****其余 187 例全绿**（`client.smoke` 139 / `client.persistence` 25 / `client.storage` 16 / `client.fiber` 7，本机现数）——目的地这件事在本版之前没有任何用例看守，这两条腿是本轮新加的，不是"一直都有" |
+| **G1** 把一处 `require(userInput)` 藏在与代码同行的注释后面 | L1 L3 L4 L5 L7 | 门自己的第一轮实现会**漏掉这一整行**（当时的过滤规则按行首丢弃）；改成"剥掉注释段、保留其后的代码"后转红——这条是蓝军复核抓出来的，我方原来的写法确有该盲区 |
+| **G2** `fetch(HOST_API` 换成 `fetch(whichApi` | L6 L7 | L6 是唯一能在"该分支没被跑到"时仍然发现的腿；另有 13 例因运行期引用未定义而红，属附带 |
+| **G3** URL spec 前面加一个斜杠（rooted，`.pathname` 仍成立） | L6 L7 | 运行时"没有 scheme"这件事**不足以**区分——spec 形状与 `API_PREFIX` 核对才区分得开 |
+| **H1** 把矩阵里 `WebSocket` 写成"存在"（文档说谎） | **只 L8** | 文档侧虚假声明的唯一哨兵 |
+| **H2** 代码里冒出矩阵标为"不使用"的 API | **只 L8** | 能力偷偷进代码的唯一哨兵（H1/H2 各钉一半，不可互换） |
+| **I1** 把存档正文改掉一个字符 | **只 L9** | "原文未改动"这句话有见证，不是装饰 |
+| **I2** 从 README 删掉存档指针 | **只 L9** | 声明"对方已收回"的文档必须指向那份原文 |
+| **J1** 从 `package.json` 的 `files` 里删掉那份存档 | **只 L9** | 引用它的两份文档都随包发出去，白名单漏了就全是死链（本轮实测：写成目录会把 590 kB 截图一起拖进来） |
+| **J2** 把说明符写成 `react/../jsx-runtime`（点段路径） | L1 L3 L4 L5 L7 | L1 点名"不是合法模块 ID"；蓝军指出旧写法会让它**通过 peer 前缀规则**，这条现在被 `MODULE_ID` 拒掉 |
+
+**门自守实验 F1（不计入破坏数，它抓到的是门自己的洞）**：把扫描函数的匹配串改成不存在的 `requireX(` 使其落空。第一版门下 **L4 是绿的**——它遍历一个空集合，`peers.length >= 4` 只守住了清单、没守住扫描；补上"字面量数 == 调用点数且 >= 4"的自守后重跑，L1 L3 L4 L6 一起红。这是本仓库第三次"绿的是门不是代码"（前两次见 9.27.0 的 R-5 与 T-1），处置方式与 `CONTRIBUTING.md` 准入规则 (1) 一致。
+
+**同模型不同角色的对抗审查（本轮的 🔴 在文档，不在代码）**：审查方读 `lib/client.js` 后指出，我方第一版「可审计能力面」写着"其余开口面同样只有这些"，却漏了三条真实的页面侧能力——`URL.createObjectURL` + `<a download>`（导出主题包时把 Blob 交给保存对话框）、`navigator.clipboard` / `document.execCommand("copy")`（复制分享链接）、`FileReader` + `type: "file"`（读用户主动选中的文件）；另外"脚本内不存在任何可拼出的外部绝对 URL"这句也不成立——壁纸图片本身就按用户填的 URL 加载。处置：把那一节改写成**逐格核对的能力矩阵**（L8），并把"预填不等于生效"单独写明。审查方同时更正了两处我方口径：`sent.urls` 之前不记录 URL（fixture 现补），以及 `document.baseURI` 在沙箱里从未被设置——所以 L7 跑的是兜底分支，于是本轮把"有 baseURI / 无 baseURI"两种页面形态都测了。
+
+### 五、未验证与边界（照实说）
+
+- **这条改动不能替对方的扫描器证明任何东西**。它把"有限调用集"从我方的**不可证**变成**可枚举且被门守住**；对方是否因此放行 catalog 取决于其审查流程，而该追评同时写明"未执行我方测试、未跑宿主，runtime acceptance unknown"。**本版不承诺 catalog 变绿。**
+- `require` 在宿主侧究竟能解析到什么（宿主模块表的内容）不在我方可控范围，本版表述止于"我方开口面是这四个"。
+- "真实文件/网络能力"这一审查项仍由**对方**执行：我方交出的是可读清单 + 可失败的门，不是对其审查结论的代答。
+- L7 观察的是**合成沙箱里**实际发起的 URL（两种页面形态各自采样），真机 Chromium 下 `<base>` 标签改写 baseURI 时的完整链路未经 DSH 实测——可承诺的是"目的地不含协议与主机"，不是"路径一定等于 `/dream-skin/api`"。
+- **能力矩阵的词汇表由人列**（L8 逐 token 现扫，token 名单在测试与文档两处、由门强制两边一致）。它能保证"列出的都核过、代码里冒出来的已列 token 一定被抓"，**不能**保证"某天出现一枚我们没想到要列进来的新 Web API"也会被抓——那需要有人先把名字加进词汇表。这条边界同样写在 `docs/desktop-support.md`。
+- L8/L1/L6 是**文本级**检测（读 `lib/client.js` 的字节），不是运行时沙箱证明：它能发现"代码里出现了这串字符"，发现不了"通过计算得到的 API 名"（例如 `window[key]`）。我方没有那种写法，但这句话只能说"没有"，不能说"门证明了没有"。
+
+### 六、发布读数（10.16.0）
+
+- **CI**：run `38855474772`（提交 `f8cc070`）六作业 conclusion 全 success。`test (18)` / `test (20)` / `test (22)` 三份各打印 `# tests 541 / # pass 510 / # fail 0 / # skipped 31`（那 31 条是"没有宿主就不跑"的宿主侧用例），`test (24)` 同一组数、用的是 `ℹ` 形；`typecheck`（`typescript@5.6.3`）与 computed-style 真引擎门全绿。
+- **npm**：`npm publish` 回执 `+ dsh-dream-skin@10.16.0`，`shasum a059b32b57f9217aa5260a2d63fe97a0fa2dc297`，与本机 `npm pack` 出来的那一个**逐位相同**。公共 packument 现读：`dist-tags.latest = 10.16.0`、`time["10.16.0"] = 2026-10-16T05:28:05.112Z`、`fileCount 25`、`unpackedSize 1,185,730`。**读侧延迟第十次实遇**：发布回执刚出来时按版本号查 `npm view dsh-dream-skin@10.16.0` 回的是 `E404 No match found for version 10.16.0`（与"版本号打错"完全同形），几分钟后 packument 的 `time` 条目已到位——判"发出去了没有"仍然只看 `time`，不看第一次读。
+- **临时 profile 真装一次**（`docs/publishing-to-npm.md` §8.2 那条路，一次性目录 + `--config.minimumReleaseAge=0`，因为本就在 24 小时窗口内）：三个读数 `package.json` 的 `version = 10.16.0` / `lib/client.js` 里 `PLUGIN_BUILD = "10.16.0"` / 安装物 **25 个文件**；`lib/client.js` 的 sha1 与工作树**逐位相同**；`docs/evidence/dsh-store-1411-followup-2026-10-15.md` **确实在安装物里**——`files` 白名单那条 L9 门防的就是"引用随文档发出去、被引用的原文没发"。
+- **tag 与 release**：`v10.16.0` 是指向 `f8cc070` 的 annotated tag object（`463f74767db9fa8dcfeb654ebb82b216f584f924`）。**这次不是用 git 推的**：本机那一刻 `github.com:443` 直连与 7890 代理都连不上（`curl` 两种路径都失败），而 `api.github.com` 可达，所以 tag 对象与 `refs/tags/v10.16.0` 走 REST 建，随后**删除了本地那个同名 tag**以免两个 tag 对象分叉（下一次 `git fetch --tags` 会拿到远端那份）。Release：<https://github.com/RevolutionLA/dsh-dream-skin/releases/tag/v10.16.0>。
+- **发出去的文档里有一条算错的数，记在这里而不是悄悄改**：10.16.0 的 `README.md`（随 npm 包分发）写"其余 **341** 例全绿"，那是我算错的——本机现数是 **187**（`client.smoke` 139 / `client.persistence` 25 / `client.storage` 16 / `client.fiber` 7）。仓库里的 README、CHANGELOG、`docs/desktop-support.md` 与 GitHub release 正文都已按 187 更正（release 正文是发布之后 `gh release edit` 重发的，已核过正文里只有 187）；npm 包不可覆盖，那条错数会跟着 10.16.0 的安装物留在 registry，由下一版带走。**给目录方的答复用的是改后的数**，且答复发出去时公开物里仍留着旧的那一条——这个先后顺序本身就是"发出去的文档 ≠ 仓库里的文档"的现例。
+- **本地全量重跑的一次红**：文档改完后 `node --test tests/*.test.cjs` 出现 1 例红，是 `client.persistence.test.cjs` 里那条 4.5 秒定时器用例（`post-release review: hung host probe releases the gate…`）；该文件单跑两次都是 25/25 绿，之后全量重跑一次也是 **541/541**。按本仓库既有的"全量并行时定时器类用例受邻居干扰"边界记账——这一例没有翻成对外结论，CI 四矩阵与两次全量重跑都是绿的。
+
+## [10.15.0] - 2026-10-15
+
+> **上一版说"那枚通配是承重的、所以不动"，这一版去查它到底承不承重——查出来说那句是推断。** 第三方目录 DSH STORE 的报告（`AI-Scarlett/DSH-Store#1411`）里有两条：一条是单文件字节上限（10.14.3 量过、动不了，原文保留），另一条是 `runtime artifact pattern requires review: ./locale/*.json`。10.14.3 当时的结论是"这条不能修，删掉 exports 里的通配会让宿主解析语言文件时抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`"。**这句话从来没被读过，只被推过。** 本轮把宿主自己的 `readPluginMeta()` 直接调起来跑了 **14 份 manifest + 11 枚文件名探测（25 次宿主调用）**，读数如下（表里只列决定性的几条），然后按读数改成显式枚举。合计 **229 项质量门全过**（217 调色 + 12 工艺，两池都不碰），全套 `npm test` 528→**532 全绿**。
+
+### 一、取证：把宿主函数叫进来读，而不是猜它
+
+调用方式：`import()` 装在 `@deepseek-ai/dsh@0.2.0-rc.1` 里的那份 `@deepseek-ai/dsh-app-boot`，用它自己导出的 `readPluginMeta('dsh-dream-skin', <解析基址>)`；每份 manifest 在临时 `node_modules` 里摆好再交给宿主解析。判定表落在 **`tests/fixtures/plugin_meta_readings.json`**，生成器 **`scripts/gen-plugin-meta-readings.cjs`**（本机没有宿主时 **exit 2** 并说明"我方自己的镜像不算见证"；跑不出两种失败形状时**拒绝写表**——一张全绿的见证表证明不了任何事）。
+
+| manifest 形状 | 宿主实际返回 | 含义 |
+|---|---|---|
+| 显式枚举（本包现状） | `outcome: localized`，两语 title/description + `hasIcon: true` | 改成显式枚举**不丢任何东西** |
+| `./locale/*.json` 通配 | `outcome: localized`，同上 | **通配从来不是坏的**——10.14.3 那句因果是错的 |
+| 在场一枚 `ja.json` 没有导出 | `outcome: error`，`ERR_PACKAGE_PATH_NOT_EXPORTED`，`errorSubpath: "./locale/ja.json"` | 这才是会抛的那一种：宿主接住错误、**我方那一行同时失去标题、描述与图标** |
+| `en.json` 没被导出 | `outcome: manifest-fallback`（不抛） | English 走 `optionalResourcePath`：整行静默退回 manifest 文本，比上面那种更安静 |
+| 一枚**已导出**但文件名宿主不认（`zh_CN.json`） | `outcome: error`，`must use a language id as its filename` | **第二条独立车道**：与 `exports` 无关，光凭文件名就能让整行失去标题、描述与图标 |
+| 文件名宿主不认 + English 又没导出 | `outcome: manifest-fallback` | **优先级也是量出来的**：English 是进入目录循环的那道门，它缺席时连抛都不抛 |
+
+再补一条**只有实测才能给的**：宿主在解析任何东西**之前**先按 `LANGUAGE_ID` 校验文件名。本轮把 11 枚候选名逐个交给宿主跑（`filenameCorpus`），**接受** `[ab, abcdefgh, zh-CN, zh-CNA, zh-Hans-CN, en-US]`、**拒绝** `[a, abcdefghi, e2, zh-CCCCCCCCC, zh_CN]`——`abcdefghi` 与 `zh-CCCCCCCCC` 这类边界只有跑过才知道是 8 个字符而不是 9 个。测试里那枚镜像正则**由这张表约束**（M8：把它放宽一格就红），不是从宿主源码里抄的字符串。
+
+关键一条：**宿主不猜语言码**。`dictionariesOf()` 是 `readdir` 那枚 `locale/` 目录、把里面**每一个** `.json` 逐个解析的，所以"显式枚举"覆盖的就是它将要请求的全部文件，通配在这里不多做一件事。10.14.3 说的"先拿到宿主究竟会请求哪些语言码的证据再枚举"——证据就是这四行。
+
+### 二、改了什么
+
+- **`package.json`**：`exports` 里 `"./locale/*.json": "./locale/*.json"` 换成 **`"./locale/en.json"` + `"./locale/zh.json"`** 两条显式条目。用户可见变化为**零**（两种形状宿主都解析成功），这正是它安全的原因；收益是那条 pattern 告警变成可枚举，以及"新增语言文件忘记导出"从静默失败变成红门。
+- **`tests/package.i18n.test.cjs` 3 → 6 条**，重写成双向门 + 一条语言码实测对照：
+  - **在场 ↔ 导出**两个方向都查（文件没导出 / 导出指向不存在的文件），通配本身也点名；
+  - `hostOutcome()` 是与上表**逐格比对**的镜像（不是同义反复：它算错任何一个形状都红在 "mirror predicts X but the host returned Y"），另有一条腿要求那张见证表**必须同时含两种失败形状**、还有一条腿核对"见证里声称看到的语言"确实还在本仓库的 `locale/` 里（陈旧见证要点名，不能继续被当事实引用）；
+  - 一条**语料腿**把镜像那枚 `LANGUAGE_ID` 拿去和 11 枚实测名逐格对，并要求语料里**既有被接受的也有被拒绝的**（一边倒的语料约束不了一条规则）；文档同时写明**没被见证的那一支**：`duplicates locale` 需要 `EN.json` 与 `en.json` 在同一目录共存，大小写不敏感的文件系统摆不出这个夹具，所以那条分支刻意不建模、也不假装建模；
+  - 两条**对照腿**把两件事分开：通配与"导出指向不存在的文件"在宿主侧都**不**改变读数，所以它们只该由策略那条红——如果哪天有人把两视图合并，对照腿会红。
+- **作废四处**（原文保留、就地标注，不静默改写）：`README.md` 10.14.3 段、`docs/publishing-to-npm.md` §十一、`docs/desktop-support.md` 头部本轮句子、以及本文件 10.14.3 条目里那条"明确不动的一处"。**新写的 `docs/publishing-to-npm.md` §十一 里还加了一条自纠**：写下"某处是承重的、所以不动"时先问这句是从哪儿知道的——这里的答案本来只要一次 `import()`。未经实测的前提一旦进了文档，下一轮就会拿它当理由，而这两份文档都在 npm 的 `files` 白名单里（10.14.2 已经为"发出去的文档"付过一次重发）。
+
+### 三、门与账本
+
+- **回归门 532/532**（10.14.3 为 528），**质量审计 229/229**（217 调色 + 12 工艺，两池都不碰）：净 **+4** = `tests/package.i18n.test.cjs` 3 → 6（评审整改那一半只加断言与变异腿，不加用例）+ `tests/package.icon.test.cjs` 5 → 6（图标可达性那条，见 §四 BL-03）。
+- **变异 15 条腿（M1–M15）逐条实跑并按字节复原**（控制腿改前改后都跑回绿才算数）：M1 删掉 zh 导出 ⇒ 枚举腿红；M2 改回通配 ⇒ 策略腿红；M3 在场 `fr.json` 没导出 ⇒ 枚举腿红（这就是 DSH-Store 那条告警背后的真实缺陷形状）；M4 镜像忘记通配也算覆盖 ⇒ 比对腿红；M5 镜像把"English 没导出"算成抛错 ⇒ 比对腿红；M6 把见证表剪成全绿 ⇒ 红；M7 见证声称看到 `de` 而仓库没有 ⇒ 红；**M8 把镜像的 `LANGUAGE_ID` 放宽成 9 个字母 ⇒ 语料腿红**（`abcdefghi` 是宿主实测拒绝的）；M9 镜像把目录那一支删掉 ⇒ 比对腿红；M10 见证去掉来源字段 ⇒ 红；M11 见证指向仓库里不存在的生成器 ⇒ 红；M12 见证声称看到 `de` 而仓库没有 ⇒ 红；M13 把镜像的 `LANGUAGE_ID` 放宽成 9 个字母 ⇒ 语料腿红；M14 把文件名那一支整个删掉 ⇒ 比对腿与 `zh_CN` 那条变异腿同时红；M15 把恒等映射要求删掉 ⇒ 枚举腿红。**另有一遍不在这 15 腿里的复验**：把评审用来攻破旧门的六种 manifest 逐个搬进临时副本重打 ⇒ **六条全部翻红、未改动的控制副本全绿**（旧门对这六条是 6/6 通过的，那正是 BL-01 的形状）。**没有一条是靠"看起来会红"记下的。**
+- `repo:eol` 122 → **124** 文件 LF（新增生成器与判定表两份）。
+
+### 四、同模型不同角色的对抗审查（`BLUE-10150`）与整改——本轮被评审抓出**一个真的 🔴**
+
+流程如实声明：这是**同一个模型换角色跑的敌意审查**，不是独立第三方；报告落盘在临时目录，不入库（`docs/review/` 在本仓库是 gitignore 的）。它跑在我把门从 3 条改成 6 条之后、发布之前。下面每条记**处置**，也记我本机**独立重跑**的结果——不采信"我跑过了"这句话，包括我自己上一轮的那句。
+
+- **BL-01 🔴（采纳，已修）镜像只读 `exports` 的键，从不读它的值。** 评审造出一份 manifest：`"./locale/zh.json": "./locale/legacy/zh.json"`——键齐全、磁盘上文件也在、枚举报满，**门 6/6 全绿，而宿主把整行销毁**。我按同一形状自己重跑了七种 target：dangling ⇒ `ERR_MODULE_NOT_FOUND`；改指别处 ⇒ "must share the English locale directory"；`{require: …}` 与 `null` ⇒ `ERR_PACKAGE_PATH_NOT_EXPORTED`；目录冒充 `locale/fr.json` ⇒ `ERR_UNSUPPORTED_DIR_IMPORT`；**English 本身是目录 ⇒ 同一条抛错**（这条最反直觉：English 的"可选"只覆盖**缺失**，不覆盖**坏**）。**改法**：把不变式从"键在不在"换成 **恒等映射**——`./locale/<x>.json` 必须指向 `./locale/<x>.json`，另加一条"每个 locale 条目必须是常规文件"。四种坏形状现在各有见证案例 + 策略腿 + 变异腿。**改完拿评审自己的六条攻击清单在临时副本里重打：六条全部翻红、未改动的控制副本全绿**（旧门对这六条是 6/6 通过的——那正是 BL-01 的形状）。
+- **BL-02 🟠（采纳）本轮我在退役一句未实测因果的同时，又写进了一句新的。** 新那句是"导出指向不存在的文件，宿主永远不会注意到"。实测把两种"不存在"分开了：`exports` 的**键**在场而文件不在场 ⇒ 确实无害（`export-key-without-file`，宿主 `localized`）；键在场而**目标**不存在 ⇒ 致命。文档现在按这两种分别说，不用一句盖住。
+- **BL-03 🟠（采纳）图标与文本是两条契约。** 删掉 `./package.json` 这枚导出，标题与描述照常、**图标静默消失**，而此前仓库里没有任何门会红（`tests/package.icon.test.cjs` 镜像的是 `iconOf()` 的文件规则，不看 manifest 可达性）。现在恒等映射腿管它，见证里保留一例 `outcome: localized` + `hasIcon: false`；另有一条对照腿钉住"掉 `./package.json` **不**改变文本判定"，防止两条契约被合回一条。
+- **BL-04 🟡（部分采纳，残留风险写明）"独立见证"其实信任何人手写的 JSON。** 加了来源约束：`generated_from` 必须点名是哪份宿主的 `readPluginMeta()`、`generated_by` 必须是仓库里真存在的那支脚本，两条各配一条变异腿（M10 删来源 ⇒ 红；M11 指向不存在的脚本 ⇒ 红）。**如实说清它挡不住什么**：门无法证明这串读数不是有人照镜像的输出抄的——它只把伪造变成一次**有名字的故意动作**。这是本仓所有"把真实测量提交成夹具"做法的共同边界，不是这枚门特有的洞。
+- **BL-05 🟠（采纳）我写了"原文保留"，可其中两处其实是我改写过的话。** 现在从 `git show HEAD:` 逐字取回 10.14.3 的原句放在作废标记下面（README 与 `docs/publishing-to-npm.md` §十一 各一处），四个作废点全部核验为**逐字在场**。这条本身就是"引用别人的话时不许顺手压缩"的现例。
+- **BL-06 🟡（采纳）口径过期：** 见证从 4 例长到 14 例 + 11 枚文件名探测（25 次宿主调用），README / CHANGELOG / `docs/desktop-support.md` / `docs/publishing-to-npm.md` / 门自己的注释还写着"四份"。五处全部改正。
+- **BL-07 🟡（一半采纳，一半记为洞）** 目录冒充 locale 文件现在有见证、有恒等映射腿、有"必须是常规文件"断言；**逃逸符号链接那一支仍未建模**，记在 §五，不写成"已覆盖"。
+- **BL-10（采纳）`DSH_HOST_PKG` 在我那版生成器里是候选而不是 override**：指错目录会静默改用全局那份宿主并 `exit 0`，看起来像一次成功的重生成。现在显式给定的 override 解不开就是 **exit 2 并点名那个路径**——与 `scripts/host-preflight.cjs` 同一个口径。
+- **驳回两条：** BL-08（`readPluginMeta` 对非包名 specifier 返回 `undefined`）——我方 loader 用的就是裸包名，不可达，只作边界记录；BL-09（我把"目录方为什么想要显式枚举"写成了对方的主观动机）——降格为"他们报告那一行的字面意思 + 我方按可审性自己做的决定"，结论仍以 §五 那句"不承诺 catalog 变绿"为准。
+- **一条流程上的自我记账：** 本轮先按 528→530 写完文档，改完门才发现是 531，`docs.numbers` 于是自己报了 4 条红——**"改门要回头重算门自己数出来的那个数"这条老账第四次重演**，红的是我自己写的文档。
+### 五、未验证与边界（照实说）
+
+- **"活页复验插件列表"这一项本轮换了取证位置，也留了一个缺口。** 拿到的是：在真实 web profile 的解析基址上直接调用宿主 `readPluginMeta()`，读到 `title: {en: "Dream Skin (dsh-dream-skin)", zh: "主题皮肤 (dsh-dream-skin)"}`、两语 description、以及 2,566 字符的 icon data URL——**这就是宿主渲染列表那一行时执行的同一段代码**，比重启一次更直接。没有拿到的是：重启后的**页面上那一眼**。宿主半边只在 profile 加载时被读，本会话没有再打扰正在跑的实例（也不必要：改动前后宿主返回的都是同一份本地化文本）。
+- **引擎门的一条并发观察（本轮两次实遇）**：把完整套件与另一份套件同时跑时，`tests/wash.cascade.test.cjs` 里两条**引擎变异腿**各自超时翻红过一次——`removing the fade rule brings the band back in the same engine` 用了 90.7 s、`the caption rule wins by SELECTOR; !important is the inline-stamp belt, not the mechanism` 用了 399.9 s，而它们单跑平常是 1–3 s。复核口径：**单独重跑整份套件 532/532 全绿**，两条腿各自单跑也全绿。所以这条记的是"这台机器上两份套件抢同一个浏览器会假红"，**不是**"这两条门坏了"——把它写成缺陷是错判，把它悄悄忽略也是。要根治得给引擎腿加串行锁或独立 user-data-dir，那是另一件事，本轮没做。
+- **两条测不到 / 未建模的分支写在这里，不藏在代码注释里**：① 一枚**逃逸到包外的符号链接**（宿主报 "must share the English locale directory"）我方完全没建模——`BLUE-10150` BL-07 的另一半，记为洞而不是"已覆盖"；
+  **一条测不到的分支写在这里，不藏在代码注释里**：`duplicates locale`（两枚文件名只在大小写上不同）在本机造不出夹具，所以它既没被见证也没被建模；如果哪天有人在大小写敏感的平台上新增语言文件，那一支会由宿主抛、由我方那行失去元数据，而我方门不会红——这是**已知盲区**而不是"已覆盖"。
+- **不承诺 catalog 变绿**，与上一版同一口径：显式枚举消掉的是"这条 pattern 需要人工审阅"里我方那条；单文件 442,975 > 262,144 依旧命中（本版 `PLUGIN_BUILD` 字符串同长度，字节数不变），是否收录由对方策略决定。对方策略文档没有写"显式枚举是否满足它"，所以这一条是**我方按可读性做的改动**，不是"修完就一定通过"。
+- `dsh.compatibility.dshReleases` 那张机读兼容表（他们报告里的另一条）本轮仍未做——它是"把窗内投影写成逐版本承诺"的语义问题，还没定口径，定了再做。
+
+
+### 六、发布读数（10.15.0）
+
+- **提交与 tag**：代码一笔 `1c133e6`（11 文件，`+1552 / −25`：新文件 `scripts/gen-plugin-meta-readings.cjs` 与 `tests/fixtures/plugin_meta_readings.json`，改动落在 `tests/package.i18n.test.cjs`（3→6）/ `tests/package.icon.test.cjs`（5→6）/ `package.json` / `package-lock.json` / `lib/client.js` 的 `PLUGIN_BUILD` / 四份文档）。tag `v10.15.0` = tag 对象 `f8e2df99898bc81a2f95f6b8927757ef79860675`，peel 到 `1c133e6`；按纪律**只推单 refspec**（`git push origin refs/tags/v10.15.0`），一次成功，不动别的 tag。
+- **CI run 38690009462 六作业全绿**：`test (18)`/`test (20)`/`test (22)` 三份各自打印 `# tests 532 / # pass 501 / # fail 0 / # skipped 31`；`test (24)`、`typecheck`、`Computed-style gate` 三份 `conclusion=success`——**但 24 那一份的计数行这次没从日志里抓到，所以不写它的数字**（前三份加齐就够说明形状了）。严格洗门那一份照旧打印自评组名：`wash cascade OK — graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`。
+- **本机两种形态**（推前重跑，纪律第 8 条）：有宿主 ⇒ `npm test` = **532 / 532 pass / 0 fail / 0 skipped**；CI 形态 ⇒ `DSH_HOST_ROOT=<空目录> npm test` = **532 / 505 pass / 0 fail / 27 skipped**。本机 27 跳 vs runner 31 跳的差额仍来自这台机器**有**壳与宿主可跳的那些腿，两个方向都核过是具名跳过。另加两遍非套件类的门：`craft:audit` 12/12、`skin:check`、`host:census:check`、`previews:check`、`typecheck` exit 0、严格 `wash:check` 六组全绿、`repo:eol` 124 文件 LF。
+- **门的可失败性这一轮是双份的**：15 条变异腿（M1–M15）逐条实跑、每条只红在它自己该抓的断言上、控制腿改前改后都跑回绿；**外加一遍"用评审的攻击当回归集"**——把 `BLUE-10150` 用来打穿旧门的六份 manifest（dangling / 指向别处 / `{require:…}` / `null` / 删 `./package.json` 导出 / 目录冒充 locale）逐个复制进临时副本重打 ⇒ **六条全部翻红、未改动的控制副本全绿**。旧门对这六条是 6/6 通过的，这句话现在是有记录的而不是回忆。
+- **npm**：`+ dsh-dream-skin@10.15.0`，packument `time` 戳 `2026-10-15T06:03:34.586Z`；`dist.shasum` `9aa51256e5ebefd789827a3c39b8d36dcbffb42f` 与本地 `npm pack` 那份逐位相同（同一次打包产出的 `dsh-dream-skin-10.15.0.tgz`，435,380 字节、24 文件；发布用的就是这个 tarball 本身）。**本轮没有实遇读侧延迟**：publish 回执之后同一次读取里 `npm view … dist.shasum / version / time` 三处已一致。**记这一笔是为了别把它读成规律**——前九轮里"回执已出而 packument 仍旧"实遇过九次，判"发出去了没有"仍然只看 `time`。
+- **从 registry 真装一次**（发布清单 B6）：一次性目录 `npm install dsh-dream-skin@10.15.0` ⇒ 装到 `10.15.0`、**24 文件**；`lib/client.js` 442,975 字节、`lib/index.js` 15,186、`package.json` 3,944、`README.md` 164,031、`docs/desktop-support.md` 171,820、`docs/publishing-to-npm.md` 39,676、`docs/design-philosophy.md` 9,146、`locale/en.json` 218、`locale/zh.json` 197、`icon.svg` 1,905 —— **全部与工作树逐字节相同**；安装物里 `exports` 的 locale 键现读为 `["./locale/en.json","./locale/zh.json"]`（通配确实不在了，这是发出去的那份的形状）。`CHANGELOG.md` **不在安装物里**——`files` 白名单本来就不含它，我的核对脚本一开始把它当 DIFFERS 报了一次，那是脚本的错不是包的错（口径写下来，免得下一轮又去追这个"差异"）。
+- **并且把宿主函数指向那份 registry 安装物读了一次**（本版承重的正是这件事，所以不能只在工作树上验）：`import()` 本机 `@deepseek-ai/dsh@0.2.0-rc.1` 内的 `dsh-app-boot`，用安装目录作解析基址调 `readPluginMeta("dsh-dream-skin", …)` ⇒ `title = {en: "Dream Skin (dsh-dream-skin)", zh: "主题皮肤 (dsh-dream-skin)"}`、两语 description 都在、icon 是 2,566 字符的 data URL。**安装物被宿主读出来仍然是本地化的一行**，这条本轮就此闭合。
+- **GitHub Release**：<https://github.com/RevolutionLA/dsh-dream-skin/releases/tag/v10.15.0> 已出；答复追发到 <https://github.com/AI-Scarlett/DSH-Store/issues/1411#issuecomment-6185731087>（明写显式枚举已完成、旧因果已纠正，同时**不承诺 catalog 变绿**——单文件 442,975 > 262,144 依旧命中）。
+- **仍未拿到的那一眼**：本机正在跑的 DSH Web 仍是本轮改动之前加载的宿主半边（未经同意不重启），所以**发布后没有新的活页目视读数**；插件列表那一行的正确性现在的证据是"宿主同一段代码对真实包与对安装物各读通一次"，不是"有人在页面上看见了它"。
+## [10.14.3] - 2026-10-14
+
+> **第三方目录（DSH STORE）的固定 Commit 检查把我们标成 catalog blocked，本轮是"量清楚之后决定不改什么"。** 它的报告说 `lib/client.js` 442,975 字节超出自动审核面的单文件上限 262,144。先量：这个文件**在 DSH 里必须是单文件**——宿主用一个 combo 请求把所有插件的 client 拼成一个 URL 送进浏览器，包内同级路径实测 404；而且同一台机器上 **8 个同行插件的 client.js 也都超过那条上限**（最大 2,468,635 字节）。所以我们**不**为了字节数去 minify 或剥注释——那个文件同时是本项目"可读原生 token 源码、无注入"承诺的**审计面**。合计 **229 项质量门全过**（217 调色 + 12 工艺），全套 `npm test` 524→**528 全绿**。
+
+### 一、先测：两条决定性事实
+
+- **单文件是宿主决定的**：活页 `performance.getEntriesByType('resource')` 读到 `http://127.0.0.1:3080/plugins/??@linxin666/dsh-web-all/client.js,…,dsh-dream-skin/client.js,…&rev=6d3cb447be9b`——19 个插件的 client 拼成**一个**请求；对包内同级路径的探测 `/plugins/…/types/index.d.ts`、`…/index.js`、`…/locale/zh.json` **全部 404**。⇒ "把它拆成几个 chunk"不是一个可选项。
+- **上限对生态是普遍超的**：`find ~/.dsh/profiles/web/node_modules -name client.js -size +250k` 现读到 **8 个第三方插件**超过 262,144，最大 `@linxin666/dsh-web-all/lib/client.js` **2,468,635 字节**（约 9.4 倍上限）。所以这是"审核边界遇上宿主形态"，不是我方特例——也是为什么不该由我们去削足。
+- **顺带一条读法纠正**：活页 `__DSH_DREAM_SKIN_STATUS__.build` 现在读到 **`10.14.2`**（浏览器半边每次页面加载从宿主取新 bundle，`rev` 变了就换），而**宿主半边**（`lib/index.js`）仍是进程起来时那份。上一版那句"真机装载 0 次"作废的是宿主半边；这条区分写清楚了，别让"界面已是新版"和"服务端半边已是新版"混成一句。
+
+### 二、改了什么（以及明确不改什么）
+
+- **新增 `tests/package.runtime_size.test.cjs`（4 条）**：给每个发货的 JS 运行时产物设一个**声明的天花板**（`lib/client.js` 480 KiB、`lib/index.js` 40 KiB）——超了就红；并且"新多出一个发货的 `.js` 却没设天花板"也红（这正是"第二运行时入口"会藏身的地方）。另有一条断言钉住**天花板的语义**：它是余量，不是"已通过第三方上限"——`lib/client.js` 今天就在 262,144 之上，如果哪天它反而小了，这条会红并要求删门、在 CHANGELOG 说清楚。
+- **刻意不把门写成"必须 < 262,144"**：那在我方结构下是一盏**永不绿的灯**，而 10.8.1 那一轮刚为同一种灯（"对比度 ≥ 阈值"在任何 ≤0.85 取值上都不可能绿）写过撤回理由。第三方上限作为**事实**写在门与文档里，不作为判据。
+- **`docs/publishing-to-npm.md` 新增 §十一**：把上面的量法、处置与"为什么不能 minify"写成发布动作的一部分，避免下一次有人在报告面前临时发明做法。
+- **明确不动的一处**：他们报告里的 `runtime artifact pattern requires review: ./locale/*.json` 指的是那枚 **exports 通配**，而它是承重的——`tests/package.i18n.test.cjs` 记着"删掉这个模式，宿主解析语言文件时抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`"。在没有拿到"宿主究竟会请求哪些语言码"的证据之前，保留通配、走他们的人工审阅；为消掉一条模式告警去动插件列表的多语言解析，就是拿用户能看到的功能换一次自动批准。
+  **↑ 本条由 10.15.0 作废，原文保留。** 作废的是那句"它是承重的……会抛"：**那是推断，不是读数**。同轮要的那句"证据"后来只要一次 `import()` 宿主模块就能拿到——实测显示宿主 `readdir` 语言目录、逐个解析在场文件，通配从来不是坏的；会坏的是"加了语言文件没加导出"。见下方 10.15.0 与 `docs/publishing-to-npm.md` §十一 的同名作废记录。
+
+### 三、门与账本
+
+- **回归门 528/528**（10.14.2 为 524），**质量审计 229/229**（217 调色 + 12 工艺，两池都不碰）：净 **+4** 全在新文件。
+- **新门的可失败性**：两条腿各自实测——把 `lib/client.js` 的天花板临时说成 100 字节 ⇒ 比较腿红；把清单换成含一个没有预算的 `lib/second-entry.js` ⇒ 成员腿点名红；同一判据跑在**真实清单**上必须为空（否则前一条什么也没证）。工作树未改动（跑的是内存里的表，不动 `lib/`）。
+- 全量：`craft:audit` 12/12、`skin:check`、`host:census:check`、`previews:check`、`typecheck`、`repo:eol`（121 → **122** 文件 LF）、严格 `wash:check` 与本机 CI 形态（`DSH_HOST_ROOT=<空目录>`）照结果见下节。
+
+### 四、未验证与边界
+
+- **"他们的复检会不会因此通过"未验证**：我们的处置是"不再悄悄长大 + 把单文件的成因写清楚 + 请他们澄清/放行"，**不是**"改到满足 262,144"。若他们的自动策略只认字节数，catalog 仍会保持 blocked —— 这是明知可能的结果，写在答复里而不是假装修完了。
+- 报告里"合计 467,678 字节 / 上限 2,097,152"写作 `exceeds` 是自相矛盾的（467,678 < 上限）；我方按"命中单文件上限 ⇒ 失败关闭 ⇒ 连带报扫描不完整"解读，并已在 issue 里请对方确认。
+- 8 个同行插件的体积是**一台机器、一次安装集**的读数，不是全生态普查。
+
+### 五、发布读数
+
+- 代码一笔 `db44fc4`（8 文件：新门 `tests/package.runtime_size.test.cjs` +、`docs/publishing-to-npm.md` §十一、`docs/desktop-support.md` 头部与套件口径、CHANGELOG/README 本版块、`lib/client.js` 的 `PLUGIN_BUILD`、`package.json` / `package-lock.json`）。推 main 前先 `git fetch` 发现上游被 growth-chart bot 推进了一笔 ⇒ **`git pull --rebase` 保持线性**后推（没用 force）。tag **`v10.14.3`** peel 到 `db44fc4`，单 refspec 推成。
+- **CI run 38624624107 六作业全绿**：四份 `test`（Node 18 / 20 / 22 / 24）各 `# tests 528 / # pass 497 / # fail 0 / # skipped 31`；`typecheck` 绿；`Computed-style gate` 自报 `graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`。**本机 CI 形态**（`DSH_HOST_ROOT=<空目录>`）528 / 501 pass / 27 skipped / 0 fail。
+- **npm**：`dist.shasum 62ec9aa4dd3ee5985a022559eceb7dcf31d2501` 与本地 `npm pack` 逐位相同（发布用的就是那个 tarball，429,746 字节 / 24 文件）；registry `time` 戳 `2026-10-14T19:35:43.001Z`——**读侧延迟第九次实遇**：publish 回执已出，其间 `dist-tags.latest` 仍是 `10.14.2`。
+- **从 registry 真装一次**（发布清单 B6）：装到 `10.14.3`、24 文件；本版新增内容全在 `docs/publishing-to-npm.md`（33,785 字节）——**安装物与工作树逐字节相同**，且从安装物里读到 §十一 在场、`262,144` 这个数与门名 `package.runtime_size.test.cjs` 都在；`lib/client.js` 442,975 / `lib/index.js` 15,186 / `docs/desktop-support.md` 167,760 / `README.md` 160,038 同样逐字节相同，包内 `PLUGIN_BUILD = "10.14.3"`。
+- **GitHub Release**：<https://github.com/RevolutionLA/dsh-dream-skin/releases/tag/v10.14.3>。
+- **给对方的答复**：<https://github.com/AI-Scarlett/DSH-Store/issues/1411#issuecomment-6176686104>（附 §一的复现路径与 §2 的测量命令，并指出其报告里"合计 467,678 超出 2,097,152"的自相矛盾、请其澄清命中了哪条边界）。**catalog 是否因此变绿未验证**——他们每八小时自动复检一次，下一次结果不由我方承诺。
+
+
+## [10.14.2] - 2026-10-14
+
+> **同日重发，一次纯文档修正——但它不是"锦上添花"，是"包里那句话会把人带错路"。** 10.14.1 的 tarball 里，`docs/desktop-support.md` 那条"叫读者自己枚举键清单"的命令漏了一节：`grep -oE '"dsh-dream-skin:[a-z-]+"'` 打出来的是**带引号的整段匹配**，直接与状态文件里的裸键比较，得到的是"当前版本一枚都不认识这个文件"——**一个完全假、但形状完全正确的结论**。文档在 npm `files` 白名单里 ⇒ 这句失实指引是**发出去过的**，只能重发一个包修掉，不能只在仓库里改（本仓库为同一课记过第 3 条与第 18 条）。合计 **229 项质量门全过**（217 调色 + 12 工艺），全套 `npm test` **524 全绿**（用例数不变）。
+
+### 一、改了什么
+
+- **命令补 `| tr -d '"'`**，并在文档里明写"别省掉这一节"、以及本轮就是怎么错的（同一条命令第一次跑出来的那份"17 枚全不认识"就是它造的）。
+- **整条命令按字面量钉进门里**（`tests/docs.machine_readable.test.cjs` 的 `ENUM_COMMAND` 改为全串比对），并新增一条**只删 `tr -d` 那一节也必须红**的变异腿——原来的腿是"整条命令被换掉"，兜不住"命令还在、但少了关键一节"。
+- **顺带把两条读法约束的实测数字写实**（前一版写的是"在场 18 枚 / 8 枚不在场"的概括）：现读为 **bundle 认识 24 枚 / 文件在场 17 枚设置 + 1 枚保留键 / 8 枚不在场**（逐枚点名 `accent`、`appearance`、`builtin-last`、`factory-seeded`、`favorites`、`packs`、`wallpaper-refresh`、`wallpaper-url`），**文件反多出 1 枚**（`material-memory`，来源仍未查明，作为待查项挂着）。
+- **配方 A/D 被真的当脚本跑了一遍**（只读，不写用户文件）：文件存在 ✓、去引号后 derive 出 24 枚 ✓、保留键值 `"1"` 是十进制整数字符串 ✓、`accent` / `packs` / `favorites` 在维护机上确实不在 durable 层——这正是配方 D 那句"不在场 ⇒ 只活在当前 origin 的 localStorage 里，动态端口一换就丢"的现场形状。
+
+### 二、门与账本
+
+- **回归门 524/524**（与 10.14.1 同数——本版只动文档、一条命令常量与一条变异腿），**质量审计 229/229**（217 调色 + 12 工艺，两池都不碰）。`repo:eol` 121 文件 LF、`typecheck` 绿、本机 CI 形态（`DSH_HOST_ROOT=<空目录>`）**524 / 497 pass / 27 skipped / 0 fail**。
+
+### 三、未验证与边界
+
+- 上一版那条仍然成立：**门读文本不读浏览器**，它证明文档点名的是代码真有的东西，不证明配方语义仍对。
+- `10.14.1` 的 tarball 已经在 npm 上，**它里面那句错命令不会被撤回**（npm 不做覆盖发布）；从 `10.14.2` 起读到的是对的。这就是"发布之后补"的代价形状（第 18 条），只是这次代价小到了只多一个版本号。
+- 桌面 profile 仍停在 10.12.1；本机正在跑的 DSH 实例载的还是 10.14.0 那份宿主半边。
+
+### 四、发布读数
+
+- 代码一笔 `b7d44f5`（7 文件：`docs/desktop-support.md` 命令与读数、`README.md` 本版块、`CHANGELOG.md`（含 10.14.1 §五 的发布读数补记）、`tests/docs.machine_readable.test.cjs` 的命令常量与新腿、`lib/client.js` 的 `PLUGIN_BUILD`、`package.json` / `package-lock.json`）。tag **`v10.14.2`** = `d456fe4…`（peel 到 `b7d44f5`），单 refspec 推成。
+- **CI run 38447603995 六作业全绿**：四份 `test`（Node 18 / 20 / 22 / 24）各 `# tests 524 / # pass 493 / # fail 0 / # skipped 31`；`typecheck` 绿；`Computed-style gate` 打印 `graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`。**本机 CI 形态**（`DSH_HOST_ROOT=<空目录>`）：524 / 497 pass / 27 skipped / 0 fail。
+- **npm**：`time` 戳 **`2026-10-13T18:33:52.415Z`**、`dist-tags.latest` = `10.14.2`；**`dist.shasum da2b5a8eaa2ae589723ef3388ba5e0d15e39072f` 与本地 `npm pack` 逐位相同**（24 文件 / 425,453 字节；发布用的就是那个 tarball）。**读侧延迟第八次实遇**：publish 回执已出，约七分钟内 `latest` 仍是 `10.14.1`、`time` 里查不到 `10.14.2`。
+- **从 registry 真装一次**（发布清单 B6）：一次性目录装到 `10.14.2`、24 文件；**本版承重的那份 `docs/desktop-support.md` 165,686 字节与工作树逐字节相同**，且从**安装物里**读那行 derive 命令，确认它**带着 `tr -d '"'` 那一节**——这正是本次重发的唯一目的，从 registry 侧验证到位。同次核对 `README.md` 156,707 / `lib/client.js` 442,975 / `lib/index.js` 15,186 / `docs/publishing-to-npm.md` 30,529 均逐字节相同；`CHANGELOG.md` 与 `tests/` 照旧不在包里。
+- **同日两版 ⇒ 安装命令的写法**：`10.14.1` 发布戳 `18:19:43Z`、`10.14.2` 是 `18:33:52Z`，两者都在 24 小时内 ⇒ 普通用户不带版本号的 `add` / `update` 会被 pnpm 冷静期静默退回旧版，**必须写确切版本号**；桌面 profile 那条安装路径另需 `--config.minimumReleaseAge=0`（见 `docs/publishing-to-npm.md` §8.3 / §8.4）。
+
+
+## [10.14.1] - 2026-10-14
+
+> **Roadmap C 组那条 M：把"皮肤到底生效没有"做成一个脚本能问出来的东西。** 上一版（10.14.0）之后紧接着做的事：字段语义早已写在 `docs/desktop-support.md`，但**"脚本该怎么问"**这一层一直缺——于是每次有人问"这台机器上到底生效没有"，还是要人开 console。本版补的是那层配方，外加一条**能失败的门**：文档里的键清单与 DOM 标记**从代码现读双向核对**。合计 **229 项质量门全过**（217 调色 + 12 工艺，两池都不碰），全套 `npm test` 515→**524 全绿**。
+
+### 一、先测：写配方之前先把现场量清
+
+- **持久面到底有哪些键**：`lib/client.js` 里的常量字面量现读 **24 枚**；维护机那份真文件在场 **18 枚**（含 10.14.0 新增的保留键），**8 枚不在场**。不在场的那 8 枚不是"丢了"——推送只带本次会话真的写过的键，出厂溯源值按设计永不落进这个文件（这条读法被写进文档，并且有门守着它的句子不被磨圆）。
+- **文件里还多出一枚当前版本不认识的键**：`dsh-dream-skin:material-memory`，值是一枚 per-material 的滑杆记忆（`{"frosted":{opacity,blur,composer},"liquid":{…}}`）。**本仓库任何一次提交都没写过这个字面量**（`git log --all -S'material-memory'` 现查为空），本机三个 profile（web / desktop / lark）的实装 bundle 与宿主 npm 全局目录里也搜不到 ⇒ **来源未查明**，作为待查项写进文档而不是含糊过去。它不参与任何判定，而且被 10.14.0 那条"未知键原样透传"的性质完好带着——**这恰好是那条性质的现场证据**。
+- **文档要点到的 DOM 标记逐个现读**（活页，web 通道，`nebula`）：`<html>` 上 `data-dsh-dream-skin-scheme="dark"` / `data-dsh-dream-skin-wash="1"` / `data-dsh-material="frosted"`，`<body>` 上 `--dsw-alias-bg-base = rgba(19, 17, 22, 0.4)`，我方样式表按 `id` 前缀**恰好 2 张**。同一次读到 `data-dsh-dream-skin-composer` **不在场**——所以它**不能**写进"生效"的必要条件里，否则脚本会把正常页面判成坏页。这条是量出来的，不是从代码推的。
+- **一条时序事实**（同一页）：`visibilityState:"hidden"` 的页面上 `setTimeout(…, 300)` 实测被节流到 **1112 ms**（另一次 688 ms）。配方 C 因此明写"晚撤回要等 `checkedAt` 变，单次读数不是终局"。
+
+### 二、改了什么
+
+- **`docs/desktop-support.md` 新增一节「机读出口：四条能让脚本判定的配方」**：三个来源各自的**能证明 / 证明不了**（状态文件 / 页面全局 / 计算样式）、**键清单以命令现读**（`grep -oE '"dsh-dream-skin:[a-z-]+"' lib/client.js | sort -u`）而不是抄一份表、四条配方 A 装了吗 / B 生效了吗 / C 换代打回精修了吗 / D 跨重启保得住吗，**每条各附一句"它证明不了什么"**，最后一条现场反例（`material-memory`）。
+- **刻意不与上一节的字段表重复**：同一句宣称写两遍会削弱它的 claim site（10.13.0 为这个翻过一次车）。新节讲的是**问法**，字段语义仍归原节。
+- **`tests/docs.machine_readable.test.cjs`（新，9 条）**：`recipeProblems()` 一台机检——bundle 认识的键（+ 保留键）与文档表格**双向**比对、**行数与键数也要相等**（成员相同、数量不同是"重复行/漏行"藏身之处，形状门数不出来）、"去 derive 而不是相信这张表"那条命令必须在场、两条读法约束的句子必须在场、四条配方**各自必须点到它真正依赖的字段**（A→`host:preflight`；B→`__DSH_DREAM_SKIN_STATUS__` + `data-dsh-dream-skin-scheme` + `--dsw-alias-bg-base`；C→`status !== "degraded"` + `pending === false` + 配对门文件名；D→`localStorage`）、文档点名的每一枚 `data-dsh-*` 标记都必须在 `lib/client.js` 里有引号字面量。保留键的名字与版本一律**从 `lib/index.js` 的导出反查**，不在测试里手抄。
+
+### 三、门与账本
+
+- **另一条自己踩的，形状不同但同源**：文档里那条"叫读者自己去 derive"的命令，第一版写的是 `grep -oE '…' lib/client.js | sort -u`——**`grep -o` 打出来的是带引号的整段匹配**，拿去和文件里的裸键比，第一次跑出的结论是"当前版本认识的文件里一枚都没有、文件里 17 枚它全不认识"。**假到极点的结论也可以长得完全正确**：命令能跑、输出有条有理、数字看着也对。修法是命令补上 `| tr -d '"'`，并把**整条命令按字面量钉进门里**（新增一条变异腿：只删 `tr -d` 那一节 ⇒ 门红），文档里也明写"别省掉这一节"与本轮就是怎么错的。这是第 24 条自纠形状（读错主语的门给出一份形状正确的假答案）的第三次实例，这次栽在**管道中间一段输出格式**上。
+- **本版让 10.14.0 那道文档在场门自己翻了一次红，红得有道理**：新写的发布摘要段落里也提到了那枚保留键，而 `schemaDocProblems()` 原本用"**第一条含该键的行**"定位宣称行——摘要排在正式宣称之前，门便去检查摘要，报"当前版本没写出来"。**事实一字未变，是门的 subject 被散文抢走了**。修法：给宣称行加**形状约束**（只认列表项 `l.startsWith('- ')`），并新增一条反向腿——**删掉整条宣称、只留散文提及，门必须仍然红**（这条腿钉的就是本轮这个实遇）。与第 12 条（边界不能写成"字符串出现过"）同源，新载体是"同一枚标记出现两次时，谁算宣称行"。
+- **回归门 524/524**（10.14.0 为 515），**质量审计 229/229**（217 调色 + 12 工艺）：净 **+9** 全在新文件（键清单核对 1 + 保留键跨源 1 + 反向对照 1 + 变异腿 6）。
+- **反向对照一条（这次是"整节删掉"）**：新增一条 `reverse:` 用例——把整节从文档里结构性摘掉，门必须**只报一条**"这一节没了"。加它的直接原因是我在本轮写完门的第一版里放了一条**恒真腿**：`section.replace("当前 \`1\`", "当前 \`1\`")`（替换前后一字不差），它断言的是"我把 A 改成 A 之后没问题"。**跑不红的守卫是装饰**（10.14.0 那条 `set` 特判是同一课），所以那条腿被换成两腿：删掉保留键行 ⇒ 必须点名 `never documents`；删掉 `get` 边界句 ⇒ 必须点名 `get-boundary sentence`。
+- **变异腿 6 条各自点名自己**（逐条实跑）：删一行键（`accent`）⇒ 红并点名 `accent`；塞一行代码里没有的键 ⇒ **同时**红在"查无此键"与"行数不等"两条上（这就是为什么数量腿不是冗余）；把现读命令换成别的 ⇒ 红在"让读者去 derive 的那条命令没了"；把一个标记改名成 `data-dsh-dream-skin-painted` ⇒ 红在"代码里没有这个字面量"；把 `s.status !== "degraded"` 磨圆成 `s.status` ⇒ 红在配方 C；删掉"只升不降" ⇒ 红在 monotone 那条。
+- **`repo:eol` 121 文件 LF**（新文件 +1），`typecheck` / `craft:audit` 12/12 / `skin:check` / `host:census:check` / `previews:check` / 严格 `wash:check` 照旧全绿。
+
+### 四、未验证与边界（别当成已验证）
+
+- **门读的是文本，不是浏览器**。它证明"文档还在点名代码真有的键与标记、配方还在依赖真字段"，**不证明**配方的语义仍然对——那半靠本节那一次活页读数（**一台机器、一个宿主版本、一个时刻**）与 `tests/client.smoke.test.cjs` 对快照字段集的把关。谁改了 `apply()` 的标记写法而没改 `lib/client.js` 的字面量，门会红；改了字面量也改了文档、语义却错了，门不会红。
+- **配方 B 的等式是"token 层活着"的判据，不是"每处精修都画到盒子"的判据**（后者归配方 C + 计算样式门）。文档已把这句话写在配方里。
+- **`material-memory` 的来源未查明**（见「一、先测」），本版本没去猜也没去删：它不改外观、不参与判定，被未知键透传性质完好带着。**待查方向**写在文档里（同命名空间的第三方插件 / 手工写入）。
+- **8 枚"当前版本认识但文件里没有"的键**只在一个用户真的用过之后才会出现，本轮没有逐枚造访问票——文档给的是"不在场怎么读"的口径，不是"每枚都能被门证明在场"。
+- 桌面 profile 照旧停在 10.12.1（本版不改一个像素）；web profile 是 `link:` 工作树，**正在跑的实例载的还是 10.14.0 那一份**，本版这一节的代码改动要下一次重启才加载。
+
+### 五、发布读数
+
+- 代码一笔 `48a4066`（15 文件：新文件 `tests/docs.machine_readable.test.cjs` +185、`docs/desktop-support.md` +94、8 份 README 各 −1 行、`tests/host.persistence.test.cjs` +19、CHANGELOG/README/版本三处同步）。tag **`v10.14.1`**（peel 到 `48a4066`），单 refspec 推成。CI run **38445651085** 六作业全绿：四份 `test` 各 `# tests 524 / # pass 493 / # fail 0 / # skipped 31`，`Computed-style gate` 打印 `graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`。npm `time` 戳 `2026-10-13T18:19:43.531Z`、`dist.shasum 2561788a36af0750964bccfc901a72579c7f6418` 与本地 pack 逐位相同（24 文件 / 423,725 字节，发布用的就是那个 tarball）。Release 已出。
+- **上面「二、门与账本」里那条"命令少了 `tr -d` 一节"的缺陷就是本版发现、由 `10.14.2` 修掉的**：`10.14.1` 的 tarball 里那句 derive 命令是错的（会把脚本使用者引到"当前版本一枚都不认识这个文件"的假结论）。记在这里而不是悄悄改掉。
+
+## [10.14.0] - 2026-10-14
+
+> **Roadmap C 组那条 S：状态文件有了 schema 版本，而且"前向兼容"第一次被真的演练过。** 这件事的价值不在新字段，在**它逼出来的那个问题**：`$DSH_HOME/dream-skin.json` 是**一个文件被两个可能不同版本的插件共用**的（web profile 与官方桌面壳都指向同一个 `DSH_HOME`），而在此之前"新版本写的文件旧版本还能不能读"只靠"宽容读取"这个说法兜着，没人跑过。合计 **229 项质量门全过**（217 调色 + 12 工艺，两池都不碰），全套 `npm test` 509→**515 全绿**；逐项账本见下面「三、门与账本」。
+
+### 一、先测：拿用户真文件与真旧版本跑，而不是拿夹具
+
+演练用的是**本机那份真实状态文件**（`~/.dsh/dream-skin.json`，**17 个键 / 122,777 字节**），全程只在临时目录的**拷贝**上写，原文件收尾用 sha256 复核未被改动：
+
+```
+NEW half wrote the file.
+  keys: 18 | reserved key present: true | stamp: "1"
+  values all strings: true | nested anywhere: false
+OLD half GET status: 200 | keys served: 18
+  every ORIGINAL setting served unchanged: true
+  extra keys the old half now sees: dsh-dream-skin:schema-version
+  values the old browser would have to String(): none
+OLD half wrote back (downgrade path).
+  settings all still present: true | stamp after old write: "1"
+```
+
+三行读数各管一件事：**新半边写出来的文件里没有任何嵌套**（这是形状的结论，不是偏好）；**旧半边（`git show HEAD:lib/index.js`，改动前那份）读它，17 条设置一条不少、值一字不改**，只是多看见一枚值为字符串 `"1"` 的保留键；**降级写回**时旧 `set` 的合并语义让戳原样留着，设置也不掉。
+
+### 二、改了什么
+
+- **保留键 `dsh-dream-skin:schema-version`（值为十进制整数字符串，当前 `1`）**：`lib/index.js` 新增导出 `STATE_SCHEMA_KEY` / `STATE_SCHEMA_VERSION`，每次 `writeState()` 都盖上。
+- **为什么不是 `{schema, state}` 那层信封**——这是本版真正的决定，也是先测才定下来的：那个文件有**我方控制不了的第二个读者**（同机不同插件版本）。信封会让旧版本读到 `{state: {…}}` 并把那个对象 `String()` 成 `[object Object]` 塞进设置；而"扁平字符串 + 一枚保留键"这个形状，旧读者只会多看见一条它不用的字符串键。上面那段跨版本读数就是这条决定的证据，不是修辞。
+- **戳只升不降**：`schemaStampFor()` 取 `max(文件上已有的合法戳, 本构建声明的)`。文件上若是 `9`（更高版本的戳），我方写入后**仍是 `9`**——把 `1` 盖上去就是对着字节撒谎，而下一轮升级会拿"1→N 迁移"去套已经迁过的数据。我方写入从不删键，所以"最高的那枚声明"始终为真。
+- **`get` 不泄露这枚键**：`readState()` 剥掉保留键后才是给浏览器的答案，所以新客户端不会把它当设置采纳；旧的宽容读取路径（`loadFromHost` 的逐键采纳）因此不受影响。
+- **伪造走的是同一道权威，不是第二道守卫**：`set` 里**没有**"遇到保留键就跳过"这种特判。写盘的戳永远由 `writeState()` 从**文件**重算并**盖在展开之后**，页面写什么都会被覆盖。先前确实写过一行 `if (key === STATE_SCHEMA_KEY) continue;`，把它当变异跑了一遍——**什么都不红**（戳的覆盖已经赢了），于是删掉：一道证明不了自己的守卫就是假门（10.12.1 的 B1 同形）。现在"伪造不了"这条承诺由 `M4`（展开顺序反过来 ⇒ 恰好那条用例红）钉住。
+- **加载期校验**：`STATE_SCHEMA_VERSION` 若不是 ≥1 的十进制整数字符串，模块加载即抛——将来谁把它写成 `"v2"` 或数字 `2`，代价是**起不来**，而不是往用户文件里写一枚 `"NaN"`。变异 `M7`（写成空串）实测让整套件红在加载上。
+- **顺带纠正一句随包发布的失实文档**：`lib/index.js` 的头注释一直写着 `set` 是"整体替换（full replacement）"，而实现从很久以前就是**合并**（`tests/host.persistence.test.cjs` 那条"两个写入者互相不抹"的用例一直守着合并）。`lib/index.js` 在 npm `files` 白名单里，所以这句失实陈述是发出去过的——本版按实现改写，并补上"补丁写不动保留键"的语义。这是自纠形状第 10 条（门的文案会漂）的又一实例：这次漂的不是门，是文件头。
+
+### 三、门与账本
+
+- **回归门 515/515**（10.13.1 为 509），质量审计 **229/229**（217 调色 + 12 工艺，两池都不碰）：净 **+6**，全在 `tests/host.persistence.test.cjs`（8 → 14 条）。新增的 6 条是：盖章与不外泄 / 遗留文件读法不变并补齐戳 / **更高戳不被降级**（含未知键存活）/ 伪造与删除都不动戳 / **归一化整表**（13 行：缺失、空串、`abc`、`-3`、`1.5`、`1e9`、数字、null、对象、`0`、本版本、`007`→`7`、`99`→`99`，**整组断言**而非逐条放行）/ 文档在场门。
+- **反向用例先跑红**：这 6 条在改动**之前**跑，5 条红（盖章 / 更高戳 / 伪造 / 归一化 / 文档），1 条"遗留文件"当时**假绿**——因为它比的是 `mod.STATE_SCHEMA_KEY`（当时 `undefined`）与 `raw[undefined]`（也 `undefined`），**空对空也算对**。于是每条新用例开头补了一句"模块必须导出这个键"，那一行才从绿变红。这就是第 24 条自纠形状（读错主语的门给出形状正确的假答案）换了个载体：这次不是外部数据形状，是**断言两边的空值**。
+- **变异账本 8 条腿（逐条实跑，跑完按 sha256 复原）**：`M1` writeState 不盖章 ⇒ 5 条红（盖章 / 遗留补齐 / 更高戳 / 伪造 / 归一化）· `M2` 总是写自己的版本 ⇒ "更高戳"与归一化表红 · `M3` readState 不剥保留键 ⇒ 盖章与"更高戳"红（`get` 泄露被抓住）· `M4` 展开顺序反过来 ⇒ 恰好"伪造"那条红 · `M5` 戳不做数字校验 ⇒ 归一化表红（`1e9`、`abc` 被当成合法版本）· `M6` 文档里的版本号漂成 `2` ⇒ 文档在场门红 · `M7` 版本常量写成空串 ⇒ **模块加载即抛**，整文件红 · `M8` 删掉加载期校验但常量仍合法 ⇒ **没有任何用例红**。**`M8` 是具名的不覆盖**，如实记在这里：那道校验守的是"下一次有人把常量写坏"，今天的字节里它不参与任何判定，所以它只能由 `M7` 那种"常量真的坏了"的形态证明，不能被正常形态证明。写文档在场门时另外踩到一个坑：变异若用"整篇 `replace`"，`"`1`"` 会命中全文第一个 `1` 而不是那一行宣称，**门会以为自己在检查、实际在检查别处的字符**——改成只作用在命中保留键的那一行，并加一条"未变异的原文必须全绿"。
+
+### 四、未验证与边界（别当成已验证）
+
+- **真机装载 0 次**（**发布之后作废：用户同意重启，实测见下面「六」**）：`lib/index.js` 是宿主半边，只在 DSH 启动时被读；**本机正在跑的实例仍是改动前那份**（未经同意不重启用户正在使用的实例——这是本项目的验证纪律之一）。上面所有读数来自把新旧两份模块**分别挂进临时 `DSH_HOME` 亲跑**，它们证明的是文件语义，不是"某个用户的界面上今天发生了什么"。
+- **桌面 profile 仍停在 10.12.1**（10.13.0 / 10.13.1 / 10.14.0 都没装进去）：本版不改一个像素，但也没必要为它单独动一次 profile；等 A1 那笔活页读数一起装。
+- **"旧浏览器半边会多采纳一条字符串键"这件事只到"无嵌套、其余键不变"这个精度**：旧客户端的 `loadFromHost()` 会把 `dsh-dream-skin:schema-version` 当一条未知设置采纳进 `stateCache` / `localStorage`。我方逐项核过它唯一的下游：`hasUserState()` 只在 `hostKeys.length === 0` 那一支被调用，而文件里只要有这枚键 `hostKeys` 就不可能为 0，所以那条迁移分支不会被它翻转。但**这条推理是在代码上读的，不是在真旧版本运行时里跑出来的**。
+- **只含戳、不含任何设置的文件**（`{schema-version:"1"}`）我方客户端永远不会写（`pushStateToHost()` 在 `Object.keys(patch).length === 0` 时就 return），只有手工构造的 `set` 请求能造出它；真出现时旧客户端会把这看成"宿主已有状态"而跳过首启迁移。记为边界，不加代码。
+- 文档在场门只查"那一行还在不在、数字对不对、边界句有没有"，**查不出句子被改写成仍然在场但语义错**——这一条边界写进了门自己的注释里。
+- Roadmap C 组那条 S 从 **8 份 README** 一起删除（删条目而不是打勾，开放项 9→8；少删一份 `roadmap(...)` 镜像门当场点名）。同组剩下两条 M（机读出口、批量部署指南）照旧挂着。
+
+### 五、发布读数
+
+- **提交与 tag**：代码一笔 `7a0b67b`（15 文件，`git show --stat` 现读：`lib/index.js` +77 / `tests/host.persistence.test.cjs` +219 / 8 份 README 各 −1 行 + `CHANGELOG.md` / `README.md` / `docs/desktop-support.md` / `package.json` / `package-lock.json` / `lib/client.js` 的同步笔）。tag **`v10.14.0`** = tag 对象 `84ad93f00b6dff3cbad90ae1e6fcc5e33f9904c3`，peel 到 `7a0b67b`；按纪律**只推单 refspec**（`git push origin refs/tags/v10.14.0`），一次成功，不动别的 tag。
+- **CI run 38435414822 六作业全绿**：四份 `test`（Node 18 / 20 / 22 / 24）各自 `# tests 515 / # pass 484 / # fail 0 / # skipped 31`——跳过数与上一版相同，本轮新增的 6 条**一条都不跳过**（它们只需要一个临时目录）；`typecheck` 绿；`Computed-style gate` 的严格跑打印 `wash cascade OK — graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`（10.13.0 那条"自报评了哪些组"的句子照旧在场）。
+- **本机 CI 形态**（推前重跑，纪律第 8 条）：`DSH_HOST_ROOT=<空目录> npm test` ⇒ **515 / 488 pass / 27 skipped / 0 fail**。本机 27 跳 vs runner 31 跳的差额来自这台机器**有**壳与宿主可跳的那些腿——两个方向都核过是具名跳过，不是失败。
+- **npm**：`+ dsh-dream-skin@10.14.0`，registry `time` 戳 **`2026-10-13T17:05:03.218Z`**；**`dist.shasum` `d539b4a879372f35319bf6cb11ade5aed55e5e04` 与本地 `npm pack` 那份逐位相同**（同一次 `npm pack` 产出的 `dsh-dream-skin-10.14.0.tgz`，416,421 字节、24 文件；发布用的就是这个 tarball 本身，不是重新打的一份），`dist.integrity sha512-tAg8eQBFXtjcY2…GTgsnsDr9ZQGg==` 与 dry-run 一致。**读侧延迟第七次实遇**：publish 回执已打出 `+ …@10.14.0`，而同一次读取里 `dist-tags.latest` 仍是 `10.13.1`、`time` 里没有 `10.14.0`、单版本 endpoint 404；约五分钟后三处才一致。判"发出去了没有"仍然只看 packument 的 `time`。
+- **从 registry 真装一次**（发布清单 B6）：一次性目录 `npm install dsh-dream-skin@10.14.0` ⇒ 装到 `10.14.0`、**24 文件**；本版承重的 `lib/index.js` **15,186 字节、与工作树逐字节相同**（sha256 前 16 位 `5642faa4f38c101e` 两侧一致），`lib/client.js` 442,975 字节同样逐字节相同，包内 `PLUGIN_BUILD = "10.14.0"`，宿主半边现读到 `STATE_SCHEMA_KEY = "dsh-dream-skin:schema-version"` / `STATE_SCHEMA_VERSION = "1"` 两枚常量都在场。
+- **GitHub Release**：<https://github.com/RevolutionLA/dsh-dream-skin/releases/tag/v10.14.0> 已出。
+- **本轮把 10.13.1 刚固化的那条动作真的用了一次**：`npm run host:preflight -- --profile-load` ⇒ `evaluator: the host's own evaluatePluginCompatibility()`（实装 `@deepseek-ai/dsh` `0.2.0-rc.1`）、`candidates 31 (publish stamps on 31) | in window 26 | dist-tags 0.2.0-rc.2 | newest by stamp: 0.2.1-alpha.2 — INSIDE the window`、profile 侧 `19 bundle layers loaded, 0 skipped / dsh-dream-skin: mounted` ⇒ **exit 0**。
+- **两个 profile 都没动**：web profile 是 `link:` 工作树（代码已新，但**正在跑的实例仍是旧半边**，要用户本人重启才会加载——见上面「未验证」）；桌面 profile 仍 `^10.12.1` / 实装 `10.12.1`（本版不改像素，没必要为它单独动一次，且 §8.4 那段"本机现状"读数已在发布前重读并对上）。
+
+
+### 六、发布之后补：真机装载的第一次读数（2026-10-14 01:45–01:55，用户同意重启）
+
+上面「四、未验证」里那句**真机装载 0 次**到本节为止，到此作废。**这一节是发布之后补的**，`npm` 上那个 tarball 里没有它。
+
+- **重启的是 web profile，不是桌面壳**：动手前 `tasklist` / `Get-CimInstance` 现读——**DSH 本来就没在跑**（`DeepSeek*` 进程 0 个），所以没有代关任何东西，只是按 `dsh --profile web --no-open` 把它起来（PID 18476，监听 `127.0.0.1:3080` 与 `0.0.0.0:3081`）。web profile 里本插件是 `link:` 工作树 ⇒ 起来的这一趟加载的就是 `7a0b67b` 那半新代码。
+- **装载证据**：活页 `__DSH_DREAM_SKIN_STATUS__` = `{plugin:"dsh-dream-skin", build:"10.14.0", status:"ready", shell:"web", skin:"nebula", lastError:null, storageError:null, reason:null}`；我方材质表 `dsh-dream-skin:material:liquid-glass` 与 `dsh-dream-skin-nav-icon` 各 1 张在场，`html[data-dsh-dream-skin-wash]="1"`。启动日志里没有 `skip` / 兼容拒绝行。
+- **状态文件被真宿主半边的盖章验到了**：重启前先备份 `~/.dsh/dream-skin.json`（`122,777 字节`），起页后经我方 loopback API 做一次**值完全相同的再 affirm**（`get` → 用现读到的同一个值 `set` 回 `dsh-dream-skin:sidebar-link`，返回 `{ok:true}`），落盘后 **`122,813 字节`（+36 = 恰好那一枚键的长度）**，且：键集仍是原 17 条设置 + 一枚 `dsh-dream-skin:schema-version:"1"`、**逐条值与备份逐字符相同（changed: none）**、所有值仍是字符串、`get` 的回答里**看不到那枚保留键**（served 17 键、`reservedKeyVisibleToPage:false`，写前写后同一组键同一组值）。备份仍在 `%TEMP%\dream-skin.json.bak-20261013T174541Z`。
+- **A1 的活页读数（web 通道，0.2.0-rc.1）第一次这么干净**：`anchors = {probed:8, drifted:[], notMounted:[".lXshSW_root, ._7yHdaG_panel"], channelAbsent:[], retired:[3 组], pending:false, fadeMatches:1, fadeClasses:["bhn1Oq_fade"]}`。两点值得单独记：① **`[class$="_fade"]` 这条后缀锚点在真页上抓到了宿主这一代重掷出的 `bhn1Oq_fade`**——这正是 10.12.0 写后缀锚点时承诺的事，此前只有夹具读数；② `notMounted` 只剩**一组**，而那组（todo 面板 / 队列坞）经现读确认**元素确实不在场**（`[data-testid="todo-panel"]` 0 个、`[data-queue-dock]` 0 个）——它们要一次真实提问才挂，正是 Roadmap A 组那条 S 的形状。**所以 A1 的验收句在 web 通道上还差这一组**，不是差在漂移。
+- **顺带把"晚修正观察者"在真页上验了一次，并且我差点记错它**：打开侧栏之后我立刻读 `anchors`，`[class$="_fade"]` **还在** `notMounted` 里，我当时按"25 次唤醒预算被启动期 DOM 抖动耗光"拟了条缺陷。停下来量了才看清：**观察者照常工作**，只是这个内置浏览器是 `visibilityState:"hidden"` 的页面，**`setTimeout(…, 300)` 实测延迟到 1112 ms**（另一次 688 ms），去抖后的重采样落在我第一次读取之后；再读就是 `notMounted` 只剩那组按需面、`fadeMatches` 从 `0` 变 `1`、`checkedAt` 往后走了约 3.4 秒。**记这条是为了流程**：两个候选成因（预算耗尽 / 隐藏页定时器被节流）摆在面前时，直接命名根因就是错判（本轮第二次踩同一条纪律），量一遍只要几十秒。附带结论：**这条修正在隐藏页里是"会到、但慢"**，工具方读 `anchors` 时若要判断"晚挂载是否已被撤回"，应等 `checkedAt` 变化或多读一次，而不是读到旧值就当终局。
+
+## [10.13.1] - 2026-10-13
+
+> **Roadmap A 组那条 S：宿主 rc 预检从"我记得做"变成"一条命令 + 一条能红的门"。** issue #62 的根因不是缺工具，是**缺重复**——`0.2.0-rc.1` 起宿主在 boot 阶段读我方 `@deepseek-ai/dsh*` peer 范围，不满足就整包跳过（用户侧表现为"皮肤一夜全消失"），而宿主持续发 rc / alpha，于是"今天最新的宿主在不在窗内"这句话会自己过期。本版把它做成 `npm run host:preflight`。合计 **229 项质量门全过**（217 调色 + 12 工艺，两池都不碰），全套 `npm test` 496→**509 全绿**。
+
+### 一、先测：今天真实跑出来的读数
+
+```
+preflight input: registry | evaluator: the host's own evaluatePluginCompatibility()
+  (…/npm/node_modules/@deepseek-ai/dsh @ 0.2.0-rc.1) | our window: >=0.1.0-rc.6 <0.3.0-0
+candidates 31 (publish stamps on 31) | in window 26 | dist-tags 0.2.0-rc.2 (3 tags)
+  | newest by stamp: 0.2.1-alpha.2 @ 2026-10-09T08:18:00.501Z — INSIDE the window
+…
+preflight OK — the newest published @deepseek-ai/dsh is inside our window (evaluator: host).
+```
+
+`--profile-load` 那半同一次跑出：真实 web profile 载入 **19 层 bundle、0 个被跳过**，我方那份挂在里面。
+两个顺手量到的事实：**窗外的 5 个版本全是历史**（`0.0.1-rc.*` 与 `0.1.0-rc.2/3`），本版**刻意不让它们判红**——
+只有"按发布时间最新的那一个"能红，否则这条门从第一天起就是红的、并很快被人关掉；
+`dist-tags.latest`（`0.2.0-rc.2`）与"最新发布的版本"（`0.2.1-alpha.2`）**是两个不同的问题**，各占一条判据。
+
+### 二、改了什么
+
+- **`scripts/host-preflight.cjs`（新）**：一条命令两条腿——① 判定表，② `--profile-load` 驱动宿主自己的 `loadProfileDirectory()` 读 `skippedBundles`。判定值**优先来自宿主自己那份 `evaluatePluginCompatibility()`**（从被检宿主包自己的 `node_modules` 里解析 `@deepseek-ai/dsh-app-boot`，不让机器上另一份副本替它回答）；本机没装宿主时退回零依赖镜像实现，**并在第一行把"这次是谁算的"印出来**。两份都在时逐版本要求一致，不一致 ⇒ 红在"去重生成 `tests/fixtures/host_compat_verdicts.json`"那句上。`--profile-load` 走的是**只读**那半：宿主文档写明 `loadProfileDirectory()` 跳过不兼容包时**不改 manifest**，而 `loadProfile()` 会写——所以本文件永不叫后者。
+- **`scripts/lib/peer-window.cjs`（新）**：那把零依赖的尺从 `tests/package.host_compat.test.cjs` 里**搬出来**共用，而不是在脚本里再抄一份。原文件 8 条用例全绿照跑（它仍是那两份从宿主真实 checker / 宿主自带 node-semver 抓下来的判定表的对照场）。
+- **判定表的两份夹具**：`tests/fixtures/host_packument_sample.json` 是**现场抓的** registry 回答（31 个版本 + 发布时间 + dist-tags，只留这三样，provenance 写清楚）；`host_packument_future.json` 在它之上**只加一行** `0.3.0-rc.1`、发布时间写成 2099——"按戳最新"这条尺子必须挑它，而 dist-tags 保持原样，这样两份夹具之间只差"最新那一行"这一件事。
+- **四个出口**（与 `wash:check` 同一套纪律，issue #102）：`0` 跑了且同意 · `1` 跑了但窗外（或两把尺子打架）· `3` 环境不给跑**并点名哪一样**（`registry` / `host install` / `profile`），**不算通过** · `4` 要了严格模式（`DSH_PREFLIGHT_STRICT=1` 或 `--strict`）却没跑成。
+- **发布清单落进 `docs/publishing-to-npm.md` 第十节**：命令、四个出口各是什么意思、红了只有两条诚实出口（① 对着那个版本跑表 + 真实载入，通过才抬窗，并**同轮**重生成那份从宿主 checker 抓下来的判定表；② 不抬，就在 8 份 README 的兼容表里写明"不支持"）。**第三条不存在**：把表原样留着、只在群里说一句"新版可能不兼容"，就是 #62 当时的形状。
+- **Roadmap 销账**：A 组那条 S 从 **8 份 README** 一起删除（按既定纪律删条目而不是打勾，开放项 10→9）；同时把**被上游阻塞**那条 `0.3.x` 的验收句里"先跑兼容判定表 + 一次真实 profile 载入"换成点名这条命令——那条 item 依旧阻塞（registry 上至今没有 `0.3.x`，实测），但它的验收从此是**可执行**的，不再是一句将来再说的动作。反向证据：8 份里只要少删一份，`roadmap(...)` 的镜像门当场点名翻红。
+
+### 三、这条门自己栽过的第一版（照实记）
+
+`npm view <pkg> --json` 把 `versions` 投影成**数组**，而 registry 自己给的 packument 是**以版本为键的对象**。第一版脚本按对象写（`Object.keys(packument.versions)`），在真机上跑出的是**31 行下标 `0..30` 的"版本"**——它照样打印、照样算"几个在窗内"、照样 `exit 0`。这是本仓库反复记的那一族的又一个实例：**门读错了主语时不会喊，它会安静地给出一个形状正确的答案**。修法是在 `buildTable()` 里同时接两种形状，并加一条腿把两种形状喂进同一份判定、要求逐行一致，另加一条"没有哪一行的版本号是个裸下标"（`/^\d+$/`）的断言——**这条腿是先看到 bug 才写的，但它现在守的是将来那次重写**。
+
+### 门与账本
+
+回归门 **509/509**（10.13.0 为 496）。**+13 全在新文件 `tests/host.preflight.test.cjs`**：判定表逻辑 6 条（最新尺子 / 窗外判红并给出两条出口 / `dist-tags.latest` 自成一条 / 缺时间戳与空版本表都是"报出来"而不是"平滑掉" / 镜像与宿主必须一致 / 两种 packument 形状同判）、夹具事实 1 条（今天真抓的那份必须仍是绿的，且那份 2099 的必须红）、CLI 出口 4 条（registry 拒答 = exit 3、严格 = exit 4、没宿主 = 退回镜像并**自报**、坏路径与坏参数 = 用法错但窗外夹具 = exit 1）、清单门 1 条（`package.json` 有 script、文档点到命令与 `--profile-load`、并写明 exit 3 **不算通过** / exit 1 是窗外）、`--profile-load` 真载入 1 条 + 它的降级 1 条。**具名跳过 0 条**：真机两条都跑（本机有宿主），CI 上后两条走具名跳过。质量审计 **229/229**（217 调色 + 12 工艺）；`repo:eol` **120** 个文本文件全 LF（+5：两份脚本、一份测试、两份夹具）；`host:census:check` 与 `craft:audit` 照旧绿；Roadmap 镜像门 **22/22**。
+
+### 未验证 / 边界
+
+- **这条门没有每日排程**：它和 `wash-gate` 一样只在有人跑时跑。宿主今天发了 rc 而没人跑预检，窗内窗外都不会自己说话——本版消除的是"忘了怎么查"，不是"忘了查"。把预检挂到 cron / 定时 workflow 上是下一步（Roadmap A 组已无相关条目，这条欠账记在这里而不是记成已完成）。
+- **判定表的"窗外 5 个版本"是本版现抓的**：夹具是快照，registry 会变。快照烂掉时红的是"这份夹具至少要有 30 个版本""五个月外版本"这两条断言，而不是静默失配；重抓一次命令写在 `tests/fixtures/host_packument_sample.json` 的 `_provenance.command` 里。
+- **`--profile-load` 读的是本机 profile 现状**（web profile 是 `link:` 工作树），它证明的是"今天这台机器的这个 profile 会把我们挂上"，**不是**任何用户机器上的装载；官方桌面壳那条通道依旧要用户本人重启（见 10.13.0 §六 与任务清单里那条活页欠账）。
+- **没测过的还有**：npm registry 不可达但网络"半通"（超时而非 ECONNRESET）时 `readPackument` 走的是同一条 environment 出口，但那条超时路径本机只以 `ECONNREFUSED` / `ECONNRESET` 两种注入验过。
+
+
+### 发布读数（2026-10-13，发版之后补记）
+
+- **GitHub**：main `fd61780 → ed456a9`（一笔：预检脚本 + 共享尺子抽出 + 夹具 + 门 + 8 份 Roadmap 销账 + 清单 §十），tag **`v10.13.1`** 单 refspec 推送（`refs/tags/v10.13.1 = ab540ed7f8865a6b8a1e8e3c45cba16d80c39c0c`）；第一次推 tag 时代理连接被重置，看清是"远端未收到"后原样重推一次即成（没有 `--force`、没有动别的 tag）。
+- **CI**：run **38424583854** 六作业全绿（`test` × Node 18/20/22/24 + `typecheck` + `Computed-style gate`）。`test (20)` 日志：`# tests 509 / # skipped 31`——那 31 条是**具名跳过**（本机没宿主也没浏览器的 CI 作业上，需要宿主 / 壳 / Chrome 的腿全部自己报名字），不是失败也不是通过；`--profile-load` 那两条正是这一类。计算样式作业照旧打印 `graded host[corner/fade/side/frost]`。
+- **npm**：`dsh-dream-skin@10.13.1`，packument `time` 戳 `2026-10-13T15:49:51.966Z`；`dist.shasum 0fe4612f77e3f6df5e4a49c067ae1452f69954c7` 与本地 `npm pack --dry-run` **逐位相同**，`dist.fileCount 24`、包体 411.7 kB（排除表一字未动）。**读侧延迟第五次实遇**：`time` 与 `dist-tags.latest` 已翻到 `10.13.1` 的**同一次读取**里 `versions['10.13.1']` 仍缺，约三分钟后单版本 endpoint 才读得到——再次确认"发出去了没有"只看 `time`，且 packument 内部会自相矛盾。
+- **从 registry 真装一次**：一次性目录 `npm install dsh-dream-skin@10.13.1`（3 分钟，含一次代理慢通道）⇒ `package.json 10.13.1`、`PLUGIN_BUILD = "10.13.1"`、`lib/client.js` 429,910 字节且与工作树那份**逐字节相同**；包内目录仍是那 8 项（`scripts/` `tests/` `CHANGELOG.md` 一个都不在）。
+- **GitHub Release**：<https://github.com/RevolutionLA/dsh-dream-skin/releases/tag/v10.13.1>。发布时现查：开放 issue `0`、开放 PR `0`。
+- **本机两个 profile 都没动**：桌面 profile 仍 `^10.12.1`（实装 `10.12.1`），web profile 仍是 `link:` 工作树——本版不改任何像素，但"要不要把新版装进你正在用的界面"仍然是用户自己的决定（预检的 `--profile-load` 读的正是这个 link 工作树，所以它报的是我方工作树会被挂载，不是任何用户机器）。
+
+
+## [10.13.0] - 2026-10-13
+
+> **A1 的下半：两处磨砂不再赌哈希，而 A1 的"及格线"从运行时搬进了一道静态门。** 上一版把"这条哈希在官方壳上不存在"登记成了 `channelAbsent`；这一版让那条规则**不再需要那枚哈希**——宿主自己在两条渠道上都给这两处表面公布了稳定属性。同时把验收口径改了一次（**显式作废 10.12.1 写下的那半句**，理由写在第三节，不悄悄换）。合计 **229 项质量门全过**（217 调色 + 12 工艺，本轮不碰调色与工艺，门数不变），全套 `npm test` 488→**496 全绿**。
+
+### 一、先测：这两处表面宿主自己公布了什么
+
+| 事实 | npm `0.2.0-rc.1` | 官方壳 `0.2.0-rc.2`（`app.asar` 121,348,951 字节） |
+|---|---|---|
+| todo 面板根节点上的稳定属性 | `"data-testid": "todo-panel"` **1 次**，与 `<base>_root` **同一个元素** | 同，**1 次** |
+| 队列坞的稳定属性 | `"data-queue-dock"` 打在 `<base>_dock` 上，其 **直接子元素**是 `<base>_panel` | 同形 |
+| 宿主给这两处自己画的磨砂 | `background: var(--dsw-specific-menu)` + `backdrop-filter: var(--dsw-menu-backdrop-filter)` | 同形 |
+| 那枚 token 的真值 | `blur(40px) saturate(150%)` | `blur(40px) saturate(150%)` |
+
+两条渠道的类名基名互不相同（`lXshSW`/`_7yHdaG` vs `aSus8q`/`v1kfCW`，10.12.1 已登记），但**宿主公布的属性是跨渠道稳定的键**。裸后缀不可用：实测 `_panel` 在 npm 有 12 个不同基名、在壳上也有 12 个——把 `[class$="_panel"]` 不加限定地写进规则，就是 issue L1 那个"改到别人页脚"的形状；`[class$="_root"]` 在壳上有 7 个基名，同理。所以队列坞那一半用了 `[data-queue-dock] > [class$="_panel"]`：**限定在宿主那个戳的直接子元素上**，两条渠道各命中自己那一个。
+
+### 二、改了什么
+
+- 磨砂那条规则的选择器从 `.lXshSW_root, ._7yHdaG_panel` 变成 **四个分支并存**：`[data-testid="todo-panel"]`、`[data-queue-dock] > [class$="_panel"]`、原来的两枚哈希。**哈希没有删**——它现在不是"唯一的赌注"，而是并集里的一支：宿主哪天把 testid 撤了，哈希那一支还在；哪天重掷了哈希，testid 那一支还在。探针池 `MATERIAL_SELECTOR_PROBES` **保持原样**（那两组仍在报 `channelAbsent`），因为"这枚哈希在这个渠道不存在"是值得读出来的事实。
+- composer 根节点那条 `background: transparent` 也补了一条实测：两条渠道的宿主规则块里**都没有 `background`**（npm `.uV2eYG_root` 只有 padding/flex；壳的 `RlGAzG_root` 由登记表的 `harmlessBecause` 逐轮重读），所以那枚哈希在两处可测宿主上都清不掉任何东西——真正承担这条规则的一直是 `[data-dsh-dream-skin-composer]`。
+- **属性锚点也要实测"独占了什么"**：`data-*` 锚点的安全前提和哈希锚点相反——它不飘移，但**别人可以开始贴同一个属性**，而且**同一个组件可以贴两次**。本轮把这两件事都做成门：① 宿主树里**每一个带 `lib/client.js` 的包**都进语料（本机实测 **71** 个，不是只读登记表点名的那一个），`todo-panel` 与 `data-queue-dock` 各由**恰好 1 个**包公布，且那个包正是登记表声称的 owner `dsh-client-ui-conversation`（壳的 `app.asar` 里也各 1 次）——第二个包开始贴 ⇒ 红（磨砂会涂到别人家的面上，就是 issue L1 那个形状换了一条车道进来），唯一的公布者换了包 ⇒ 也红；② 登记表里那句"各 1 次"原本是**手抄的散文**（旧字段 `npmOccurrences` / `shellOccurrences`，没有任何门重数过），现在换成 `hookOccurrences: { npm: {…}, shell: {…} }` 并**每轮从两渠道字节里重数**：宿主在第二个元素上贴同一枚 hook ⇒ 红，登记表不写明期望次数 ⇒ 也红（"字符串在场"证明不了"只被贴了一次"，这是本仓库记过的「门的边界不能写成'字符串出现过'」）。
+
+### 三、判据换了位置（**这是对 10.12.1 那半句的显式作废，不是悄悄改**）
+
+10.12.1 写下：`"每一条精修都真的命中" = drifted: [] && notMounted: [] && channelAbsent: [] && pending: false`，理由也记了（"一条能被'解释'满足的判据等于没有判据"）。**本版把 `channelAbsent: []` 从这条里拿掉**，因为它自己的理由把它判死了：`channelAbsent` 空与不空，取决于登记表里那句散文说不说"这条已查明"——被解释满足的判据仍然是被解释满足的判据，把它放进及格线，下一版就会有人为了变绿去删登记项而不是去修锚点。
+
+- 新的及格线是**两道**：① 静态配对门 `tests/host.frosthooks.test.cjs` 为绿；② 运行时 `drifted: [] && notMounted: [] && pending: false`。
+- 静态门问的是更硬的问题：**每一条还押宿主构建哈希的规则，同一条选择器里必须带一个无哈希锚点**，且登记表里 `carriedBy.anchors` 指名的那个锚点必须**真在规则里**、**真在两条渠道各自的发货字节里**（npm 装作物 + `app.asar`，现读现算，不抄常量）。摘掉锚点 ⇒ 当场红；宿主不再公布那个属性 ⇒ 当场红；宿主把 panel 换了嵌套层级 ⇒ 也当场红；**第二个包开始贴同一个属性**（或唯一的贴它的包换了）⇒ 也当场红；**宿主把同一枚 hook 贴到第二个元素上**（每渠道每 token 的期望次数现数比对），或登记表不再写明那个次数 ⇒ 也当场红（结构断言与这几条独占性断言都有合成语料腿，CI 上没有宿主也没有壳时照样跑）。
+- 为什么这不算放宽：判据从"看运行时字段空不空"换成了"看仓库能否自证锚点在两渠道存在"，前者能被登记表一句话满足，后者需要两条渠道的字节同时点头。**代价也说清**：静态门看不见运行时——如果某天宿主保留了属性却把该元素换成了别的东西，配对门仍然是绿的，那时能抓它的只剩 `channelAbsent` 这条事实字段和人的眼睛。这也是 `channelAbsent` 保留报告而不被删掉的原因。
+- 8 份 README 的验收句同步改了这个口径（`tests/readme.roadmap.test.cjs` 逐份核对结构镜像）。
+
+### 四、Roadmap 卫生（顺带）
+
+D 组挂着「外链壁纸空值态提示（S）」，但那条**已随 10.12.0 发货**（`lib/client.js` 里 `kind === "url" && !url` 那一支在，CHANGELOG 10.12.0 §七 记着 8 语言文案）——Roadmap 重排那轮漏销。按既定纪律**删除条目而不是打勾**（门要求表里只放未完成项），8 份同步，开放条目 11→10。反向证据：把这一条只塞回英文那份，`roadmap(en): mirrors README.md structure` 当场点名翻红。
+
+### 五、把"锚点命中"读成像素（`wash:check` 新增 frost 组），顺手发现 CLI 一直没给 side 组打分
+
+第三节的静态门证的是**文本**：锚点在表里、在两渠道字节里。它证不了**选择器匹配**——`[data-queue-dock] > [class$="_panel"]` 的子孙组合器、属性名里一个字符的差别，在文本门看来都"在场"，而在页面上可以是"一条规则谁也不命中"。这正是本仓库记过的「声明不等于像素」，所以本轮把它做成引擎读数：
+
+- 夹具页新增四个盒子：一个 `data-testid="todo-panel"` 的盒子与一个 `[data-queue-dock]` 的**直接子** `_panel`，两者都穿**这张表从不提及的基名**（`fixtureRolled_*`）——"宿主重掷了哈希"从页面这边看就是这个形状；一个 `_panel` 但**不在任何坞里**的诱饵；以及一个把**发货声明原样写进行内样式**的参照盒（期望值来自引擎对那句话的回答，不是我抄进文件的数）。
+- 五条判据：引擎算得出 blur（前置，算不出就整组拒绝报告而不是报"没磨砂"）、todo 锚点命中且等于参照、坞锚点命中且等于参照、诱饵必须仍是 `none`（作用域承重，脱作用域只有它红）、水洗态不得移动这一切。
+- **实测读数**（本机真 Chrome，plain / wash / washed-again 三态一致）：`frostRef` = `blur(20px) saturate(1.4)`，`frostTodoPanel` = 同值，`frostDockPanel` = 同值，`frostPanelDecoy` = `none`。**变异账本**：四条**引擎腿**（删掉哈希那一支 / 改名 todo 锚点 / 去掉坞的作用域 / 改名坞的 hook）+ 五条**合成判决腿**（锚点死、坞死、作用域外溢、水洗搬动、引擎算不出 blur）+ 一条夹具拒绝面（表里没有那枚锚点、或那条规则不再有声明时，**拒绝建页**）——每条都点名自己翻红的判据 id 集合，且**只有该红的红**。合成腿与拒绝面跑在任何机器上（CI 那台没有浏览器也没有宿主）；引擎腿要 Chrome + 宿主装作物，缺任一样走**具名跳过**。其中一条是 A1 这句话的直接实证——**把规则里的 `.lXshSW_root, ._7yHdaG_panel` 整支删掉，引擎读数一个字都不动**（承担这条规则的确实是那两枚锚点，不再是主张）。
+- **顺带抓到一条本轮之前的老账**：`wash-cascade.cjs` 的 CLI 把 host 页的判据组名单**手抄**成了 `['corner','fade']`，而 **10.12.0** 加 `side` 组时那一版自己的账本里就写着"判据组名单由门核对为 `['corner','desktop','fade','side']`（新增一组必须改这里，否则整组静默不跑）"——那句里的"这里"是测试里的组名单门，没人去动 CLI 那份手抄名单。后果：`side` 组的引擎判据**从 10.12.0 起从未被 `npm run wash:check` 评过分**（字段一直在读数行里，所以 CI 那条"字段在场"的 grep 看不见）；`npm test` 里那些引擎腿会评，但 CI 的 `test` 作业既不装浏览器也不装宿主（那里这些腿走跳过），跑引擎的只有 `wash-gate` 一个作业。现在 host 页的名单**从 `WASH_GROUPS` 现推导**（除 `desktop` 外全部），`wash cascade OK` 那句也改成**报它到底评了哪些组**：`graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`。配一条源文本门（手抄名单回来就红）与 CI 里对该句的 grep；本机严格模式实跑 exit 0，`side` 那组判据第一次在这条通道上被评分并通过。**这一句的归因本轮自我纠正过一次**：本文第一版把起点写成 10.10.0，`git show v10.10.0:scripts/wash-cascade.cjs` 现场读到那一版 `WASH_GROUPS` 只有 `['corner','fade','desktop']`（`side` 是 10.12.0 进来的，`git log -S` 也指向同一处）——"引用别人的账本时先按 tag 复核"这条纪律本轮又慢了一步，纠正在此，不留原文错句。
+
+### 门与账本
+
+回归门 **496/496**（10.12.1 为 488）。**+8 分两笔**：新文件 `tests/host.frosthooks.test.cjs` **+4**（配对一条、磨砂锚点具名一条、变异腿一条、双渠道实测一条）；`tests/wash.cascade.test.cjs` **+4**（frost 判决表一条、夹具拒绝面一条、CLI 组名单源文本门一条、引擎变异一条）。`tests/hashes.test.cjs` 的登记表门加了两条腿并改了池的语义：**缺 `carriedBy` 就红**、**`carriedBy` 指名的锚点不在 bundle 里就红**；同时保留"登记了却从不探针"那条（两组仍留在探针池里，缺席是事实）。质量审计 **229/229**（217 调色 + 12 工艺）。工艺门未新增——本轮没有新的形状约束要盯，配对、实测与像素都在 `npm test` 里。本文顶部那句合计照旧成立（调色 217 + 工艺 12，本轮不动这两池）。
+
+**磨砂配对门的变异腿：14 条**（`grep -c "legs.push(" tests/host.frosthooks.test.cjs` 现数）。**这个数在本版里改正过三次**：本文第一版写 8，而写它时文件里已经是 9 条腿——"数了但没回头核对"的账本数字，正是本仓库反复记的那一类；补两条独占性腿时按现场读数写成 11，把"字符串在场"升级成"重数贴了几次"再 +2 到 13，收口前的自查再加一条（见下条）到 14。
+- **配对门自己的一条边界，本轮补了腿**：这条门逐张表评分的是 `extractSheets()` 能**命名**的那些表。我方发货面今天只有两张（`material` / `nav-icon`），句子里"每一条还押哈希的规则"因此为真；但如果哪天注入了一张没在 craft-audit 登记过的表，配对门会照评、其余工艺门会当它不存在——"全绿"于是只对一半的门成立。现在配对用例先要 `unregisteredSheetIds(extractSheets(bundle))` 为空，另有一条腿把"往 bundle 字符串副本里种一张 `.textContent=` 表"喂给**真正的抽取器**（不是我抄给它一个形状），抽取器认出来才继续；反向的对照组是"真表里必须一张未登记的都没有"。
+
+### 未验证 / 边界
+
+- **官方壳的活页面：观感 0 次目视、0 次读数**。本版新增的是**夹具页**的引擎读数（真 Chrome + 真发货 CSS + 我们自己搭的盒子，见第五节），它证的是"这两条选择器在真引擎里命中该命中的盒子、不命中隔壁"，**不**等于"壳上那两面看起来对了"：盒子是我们按 10.12.1 / 10.13.0 读到的宿主 DOM 形状搭的，宿主哪天换了嵌套层级，夹具不会自己变（配对的字节实测与那条"直接子元素"结构断言才是防这个的腿），而真实观感仍只有用户本人重启后才看得见。
+- 夹具那两条锚点盒子的**形状是我方构造的**，不是从壳里搬来的 DOM。所以 frost 组说的是"选择器命中这个形状"，`carriedBy` 的双渠道字节实测说的才是"宿主真在两条渠道上都公布了这个形状"——两件事分开记账。
+- 宿主若把 `data-testid` 从**生产构建**里剥掉（本轮两条渠道都没剥，实测各 1 次），这一半锚点就没了，规则退回只靠哈希——**配对门会红，运行时的 `channelAbsent` 不会**（它报的是哈希）。
+- 独占性与贴次数那几条腿的**真语料版只在装了宿主的机器上跑**（CI 上没有可扫的 `lib/client.js`，走具名跳过）；CI 上跑的是同一判据的合成语料版。**代价照实说**：`shell 1/1 declared` 这类读数在 CI 上不会被真语料反驳；如果某个未来版本在别人机器上发布而没人装过宿主，"只有 owner 贴这个属性、且只贴一次"就只是登记表里的一句散文，没有本地重演。
+- `anchors.channelAbsent` 在 10.13.0 之后**不再是及格条件**，但字段语义一字未改：仍是"登记过的通道分叉，本页未命中"。消费方读它的姿势变了（`docs/desktop-support.md` 的「消费判读」）。
+- todo 面板 / 队列坞**不进探针池**：与提问卡、授权卡同一类按需挂载面，启动期采样必然恒报缺席（Roadmap A 组最后一条 S 就是这个缺口）。
+- 桌面端跨重启 `localStorage` 持久性**仍未测**（要用户本人重启两次）；`isDesktopShell()` 在官方壳上仍返回 false（契约语义，见 10.12.1 §六）。
+
+### 六、发布读数与本轮评审口径（2026-10-13，发版之后补记）
+
+**发布读数（全部现查，不是照抄上一版的姿势）**：
+
+- **GitHub**：main `3ec953d → f2f827b`（本轮三笔：并集锚点与静态配对门 / frost 组与属性独占性 / 自查后的归因改正），tag `v10.13.0` 按**单 refspec** 推送（`refs/tags/v10.13.0 = cd6b5bf5f6b65a21d473e10105f7d46bc52a07a6`），没有碰任何其他 tag，没有 `--force`。
+- **CI**：run `38412392008` 六作业全绿（`test` × Node 18/20/22/24 + `typecheck` + `Computed-style gate`）。计算样式作业在 runner 上真跑了引擎：日志 **13 行读数、零 skip 行**，OK 那句自报 `graded host[corner/fade/side/frost] desktop[desktop] coexist[coexist]`；`frostRef` / `frostTodoPanel` / `frostDockPanel` 在 CI 的 Chrome 里同为 `blur(20px) saturate(1.4)`、`frostPanelDecoy` 为 `none`。也就是说 `side` 那组判据**第一次在 CI 这条通道上被评分**（10.12.0 起一直被采样、一直没被评分），而本版新增的 `frost` 组从第一天起就在 CI 上有读数。
+- **npm**：`dsh-dream-skin@10.13.0` 的 packument `time` 戳 `2026-10-13T14:24:08.001Z`；`dist.shasum 6d0c5f7825fec6b349ac7c7a3ffde08ba5520436` 与本地 `npm pack` 那份**逐位相同**，`dist.fileCount 24`（排除表一字未动）。判"发出去了没有"仍然只看 `time`——发布后头几分钟单版本 endpoint 会 404、`versions` 里也还没有，这不是没发出去。
+- **从 registry 真装一次**：一次性目录里 `npm install dsh-dream-skin@10.13.0` → 装到 `10.13.0`、bundle 内 `PLUGIN_BUILD = "10.13.0"`、`lib/client.js` 429,910 字节且与工作树那份**逐字节相同**，两枚新常量（`TODO_PANEL_SELECTOR` / `QUEUE_DOCK_PANEL_SELECTOR`）都在场。
+- **GitHub Release**：<https://github.com/RevolutionLA/dsh-dream-skin/releases/tag/v10.13.0>（`isDraft: false`）。
+- **本机桌面 profile 仍停在 `10.12.1`，本轮没有动它**：这一版会改壳上那两处的像素，而我方只有夹具读数、没有活页读数，所以不擅自把新版本装进用户正在用的 profile；要装请说一声，路径与回滚备份照 `docs/publishing-to-npm.md` §8.4。
+
+**本轮评审口径**：按既有指示**不派生子代理**，蓝军 / 第三方 / 裁定三角色由**同一个 agent 串行扮演**——这是**降级模式**，独立性已被削弱，不称"独立复核"。实际抓到并改掉的三条（都在 `49c6730`）：① **归因写错了**——本文第一版把"side 组被采样却没被评分"的起点写成 10.10.0，`git show v10.10.0:scripts/wash-cascade.cjs` 现场读到那一版 `WASH_GROUPS` 只有 `corner/fade/desktop`，`git log -S` 也指向 10.12.0；"引用自己账本里的句子也要按 tag 复核"这条纪律本轮又慢了一步。② **配对门的可见边界**补了一条腿（未登记的样式表 = 0，并由真抽取器演"种一张进去"那一侧）。③ 变异腿计数按现数 13 → 14 同步到三份文档。
+
+**同一处要作废一句**：`49c6730` 的提交信息里第 ② 条写的是"frost 组原本没拿到从发货 CSS 现读期望值这一半，现在真的被 buildFixture 调用"——**这句不实**。`frostExpectation()` 自 `25cfff4`（frost 组那一笔）起就已在 `buildFixture()` 里被调用，而 `49c6730` 的 `git show --stat` 只有三份文档 + `tests/host.frosthooks.test.cjs`（1 file 都不涉及 `scripts/wash-cascade.cjs`）。提交信息已经进了历史、不改写，这里按仓库纪律显式标注作废：**那一条不属于 49c6730 的改动，是 25cfff4 已经完成的工作**。
+
+
+## [10.12.1] - 2026-10-12
+
+> **这一版不改一个像素，改的是读数的一句话。** Roadmap A1 的上半（10.12.0）把侧栏脚区从哈希里救出来之后，剩下的哈希锚点里有一族**不是漂移**：npm 渠道与官方桌面壳各自重掷 CSS Modules 哈希，同一张 `.module.css` 在两条渠道里基名不同。以前探针把这种"已查明的渠道分叉"报进 `drifted`，于是**官方壳上那盏灯永远是红的**——而红色一旦永远不消，它就等于没有颜色。本版加第四池 `anchors.channelAbsent`，并把登记表做成**每轮从壳的字节重推导**的事实（不是抄来的常量）。合计 **229 项质量门全过**（217 调色 + 12 工艺，两池改动不碰调色与工艺，门数不变），全套 `npm test` 480→**488 全绿**。
+
+### 一、先测：这两组哈希在两条渠道上各是什么
+
+`tests/hashes.test.cjs` 现在每轮都从**两台宿主各自的发货字节**重读一遍（npm 半边读实装安装物，壳半边读 `app.asar` 121,348,951 字节），下面这张表不是手写进文档的，是本轮跑出来的读数：
+
+| 探针组 | npm `0.2.0-rc.1` | 官方壳（内含 `0.2.0-rc.2`） | 同一条 CSS module |
+|---|---|---|---|
+| `.lXshSW_root, ._7yHdaG_panel` | `lXshSW` 2 处 / `_7yHdaG` 4 处 | **各 0 处**，同模块画成 `aSus8q_*` / `v1kfCW_*` | `skeleton/TodoPanel.module.css`、`queue/QueueDock.module.css` |
+| `.uV2eYG_root` | `uV2eYG` 命中 | **0 处**，同模块画成 `RlGAzG_*` | `skeleton/InputBar.module.css` |
+
+对齐键是 **CSS module 路径**而不是基名：基名两条渠道必然不同，而"`skeleton/TodoPanel.module.css` 里的 `root`"在两边都是同一个面。壳里的 `dsh-css:` 头把打包时的绝对路径原样嵌着（单反斜杠 Windows 路径，读之前统一成 `/`），这是这条对齐方式能机读的原因。
+
+**这两条精修在壳上的后果不一样，分开写**：`.lXshSW_root, ._7yHdaG_panel` 那条给 todo 面板与队列坞加 `backdrop-filter: blur(20px) saturate(140%)`，壳上**这条磨砂确实没生效**——宿自己在那两处仍画 `--dsw-specific-menu` 的底色，所以是外观差、不是坏面；`.uV2eYG_root` 那条是 `background: transparent`（撤掉旧底纹），而现读壳的 `RlGAzG_root` 声明块里**根本没有 `background`** 可撤，所以它**无害**。"无害"不是嘴上说的：登记表里那条 `harmlessBecause` 把"该模块的 `root` 声明块里不得出现 `background`"写成判据，壳里一旦出现就翻红（变异腿之一）。
+
+### 二、为什么不并进 `retired`，也不并进 `drifted`
+
+- **并进 `drifted`** 就是本版要治的病：`drifted: [] && pending: false` 是本文档承诺的唯一正向信号，一条**已查明**的渠道差异永久占着这个字段，等于让承诺在官方壳上永不可达。10.8.0 为退役锚点开 `retired` 是同一个病灶的第二次发作，当时已经写过"永远不可达的正向信号等于没有信号"。
+- **并进 `retired`** 则是另一种失实：`retired` 的语义是"为一条我们**量不到**的旧宿主线保留的假设"，而这两组是**两条当代渠道各量到了一次**。把它塞进 `retired`，读字段的人会以为那是一具尸体；实际上它有一个活着的继任者，姓名、住址（module 路径）都能查到。字段的消费方要能做不同的决定，字段就必须分开。
+
+### 三、登记表的准入条件（比现有那条 dead-hash 豁免更严）
+
+`scripts/data/dead-hashes.cjs` 新增 `kind: 'channel-divergent'`，一条组要进这张表必须**同时**给齐三样，缺一不可，且由 `tests/hashes.test.cjs` 每轮核对：
+
+1. npm 渠道的**实测基名**与命中数（从本机实装安装物读，读到 0 处就说明"npm 那半也死了"——那是 `legacy-host-line`，不是通道分叉，本门专抓这种混用）；
+2. 壳里**同一 module 路径**下的继任基名（从壳的字节现推；继任基名被重掷、或该 module 在壳里查无此类，各自翻红）；
+3. 失效面与后果（`effect: cosmetic | harmless`），并且**声称无害必须带证据**——`harmless` 而没有 `harmlessBecause` 直接判红。
+
+登记了却**从不进探针组**也判红（一张没人读的表就是废纸），bundle 里的组名单与登记表不一致同样判红——两侧必须双向对齐，这是 10.8.0 J1 那对钉子的同款形状。
+
+### 四、分类顺序：归属 > 登记 > 漂移，以及"读不到 CSS"不许把已登记的组吞掉
+
+`classifyMissing()` 的判决顺序是**先问宿主自有表认不认，再查登记表**。次序反过来的话，登记表就变成一块能把任何缺席洗白的橡皮——所以有一条用例专门把"同一组既是宿主自有、又已登记"的形状喂进去，断言它落在 `notMounted`。
+
+保守出口按仓库纪律写成"报出来"而不是"消失"：宿主一张自有表都读不到、或读取本身抛异常时，未登记的组照旧回落 `drifted`（pre-T3 行为原样），**已登记的组仍点名在 `channelAbsent`**——它那两半证据来自仓库之外（实装安装物与壳的发货字节），不依赖这一页的 CSS 能不能读到。新池里的组**绝不**出现在 `console.warn` 里，与 `retired` 同权。
+
+晚修正观察者对 `channelAbsent` 做的是**再分类**而不是单向撤回：一枚通道分叉的哈希若突然在本页命中，那是"测量本身变了"（壳把我方的哈希收了回去），不是"面晚挂了"，所以它从活的分类器重新发布，不写进锁存的终局列表。
+
+### 五、一处对旧承诺的更正（显式标注，不悄悄改掉）
+
+`docs/desktop-support.md` 过去把 `drifted: [] && pending: false` 写成"**全部精修在本构建生效**"的正向信号。**这个说法在本版作废**，它是被 `retired`（10.8.0）和 `channelAbsent`（本版）两次"把已解释的缺席移出告警"逐步掏空的——留着这句话，绿灯就开始说谎。现在写成两层，各自的口径钉死：
+
+- `drifted: [] && pending: false` = **没有未解释的锚点换代**（唯一那条"没有东西在静默坏掉"的信号）；
+- **每一条精修在这台机器上真的命中** = `drifted: [] && notMounted: [] && channelAbsent: [] && pending: false`；
+- `retired` 不参与第二条判读：它在任何能量产的宿主上恒为非空，把它算进"全绿"就是再造一次那盏永远不会绿的灯。
+
+### 六、顺带撤回一条我自己开错的缺陷单：官方壳上 `isDesktopShell()` 返回 false 是契约语义，不是待修缺陷
+
+本轮一度把这当成缺陷并准备开工，先测之后撤回。三枚判定戳（`data-dsh-desktop-mode` / `__DSH_DESKTOP_FILE_PATH__` / URL 参数 `dsh-desktop-mode`）在官方壳的 `app.asar` 里**各 0 命中**，第四枚 `.dshDesktopSidebarSurface`（桌面专属那第 9 组探针的锚点）**也是 0 命中**。所以就算把门打开让官方壳也"认出来"，多出来的那组探针就是一盏**永远的红灯**，还会点亮两条永远画不到东西的 CSS 规则——正是 J1 那轮写进文档的病灶反向复发。已在 `docs/desktop-support.md` 写明：**不要**改成 UA / Electron 嗅探，并留一句"把决定写成定理"的教训。官方壳上要紧的那些修正（脚区、水洗态、`channelAbsent` 判读）本来就不经过这道门。
+
+### 七、发版前的对抗评审轮（**同模型不同角色的对抗审查，非独立第三方**）
+
+按用户既有指示不派生子代理，蓝军 → 第三方 → 裁定三角色由**同一个 agent 串行扮演**，这是**降级模式**：独立性已被显著削弱，结论按此折扣使用，全链不写"独立复核 / 独立裁定"。三份报告落 `docs/review/`（已 gitignore，**不随仓库发布，也没有任何公开文档链接指向它们**）。
+
+**抓到并已修的一处 🟠**（B1）：文档写下"`retired` / `channelAbsent` 永不进入告警"，而第一版用例把这条承诺写成"壳形状页（`drifted` 全空）不该 console.warn"。但告警被**两道串联守卫**挡着（latch：`drifted>0 || notMounted>0`；打印：`terminalDrift.length > 0`），在 `drifted` 恒空的夹具上，**往任一道守卫里加入 `channelAbsent` 都不会让告警真的打印**——那条断言永远不可能红。实测：放宽内层、放宽 latch、把新池拼进打印名单，三种变异在前两种夹具下全部 `pass 3 / fail 0`。修法不是改措辞而是换夹具：补第 4 枚用例，页面里**同时**放一条真漂移（把哈希无关的脚区锚点改名）与两组已登记缺席，让告警确实在响，再断言名单里不得出现已解释的选择器；同一条变异复跑 → **恰好这一条翻红**并点名 `.lXshSW_root, ._7yHdaG_panel`，其余三条不动。变异前后 `lib/client.js` 的 sha256 前缀核对为 `1417f8f4b3d82f57`（还原当场完成）。
+
+**两方共同前提被反查出来的一条**：两方都默认"官方壳上宿主自有 CSS 表读得到（`hostSeen` 为真）"。反查结论是**这个前提没被证明过**——10.12.0 那次壳上读数（`drifted` 两项）在 `hostSeen` 真 / 假两种情形下形状完全相同。处置：文档不许诺"归属优先在真壳上发生过"，改为写进「活页机读通道」一节的**下次复测必读四项**（含 `document.querySelectorAll('style[data-plugin-css]').length`）。
+
+**采纳的另外三条文档欠账**：`channelAbsent` 不区分"壳渠道"与"npm 宿主重掷同一枚哈希"（运行时没有渠道判据，误标只影响诊断字段，由"npm 那半其实已死"那条变异腿纠正）；对新池的再分类仅在 latch 已被触发时可达；degraded 快照里 `anchors` **整个是 `null`**，而 B-3 键集守卫只比顶层键（子结构不同不会红），消费方必须先判 `status`。**一条 🟠 升级**：蓝军按 🟡 记的"§8.4 本机现状仍写 `^10.9.3`"——现场读到的 profile 依赖是 `^10.12.0`；以"现状"自称又与现场矛盾，按声明失实处理，发版装完后按现场读数重写。**四条记为边界不修**：历史块脱离门控（有意）、逐文件构成不机检（文档已写明）、`readShellAsar()` 的 121MB 整包读入（CI 不发生）、`effect: 'cosmetic'` 无判据（只有主张"没有像素可改"的 `harmless` 需要证据）。
+
+### 门与账本
+
+回归门 **488/488**（10.12.0 为 480）。+8 由套件现场加载数出来、按文件拆开记：`client.smoke` **+4**（壳形状页终局能到 `drifted: []` 且新池恰好点名两组 / 归属优先于登记 / 宿主 CSS 读不到时已登记的组仍被报出——不消失、也不被改标成漂移 / 真告警 firing 时名单里不得夹带已解释的缺席）+ `hashes` **+3**（登记表结构性一条、七腿变异一条、真语料重推导一条）。质量审计 **229/229**（217 调色 + 12 工艺，门数不变）。**变异账本**（七腿全在合成世界上跑，**没有宿主、没有壳的机器照跑**——登记表如果是被人编出来的，不该依赖任何一台机器来发现）：bundle 与登记表不一致 / 登记了却从不探针 / npm 那半其实已死 / 壳里重新画了这枚哈希 / 继任基名被重掷 / "无害"声明与 CSS 规则矛盾 / "无害"声明拿不出证据，每条只在它自己该抓的那一腿翻红。真语料那条腿在壳不在这台机器上时**具名跳过**并打印是哪两半没读到（「环境不具备」与「检查失败」是两个出口）。反向用例按仓库规则**改前跑红**：壳形状夹具在加池之前断言的 `drifted: []` 是红的，两组哈希当时躺在 `drifted` 里。**顺手拆掉一处自指的手抄**：`tests/docs.numbers.test.cjs` 里"当前版本块"的边界原本是两枚抄进来的版本字面量（`**版本 10.12.0` / `## [10.12.0]`），发版时忘了搬就会**安静地去检查上一版的诚实数字**——正是本仓库反复记录的"门自己的文案也会漂"。现在边界从文档自己的标题形状推导（`^\*\*版本 \d` / `^## \[\d`），另加一条用例把"我读的是当前这一版"钉成事实：`blockVersionProblems()` 拿 `package.json` 对照推导出来的块首版本，反向腿删掉当前块标题 ⇒ 历史块顶上来 ⇒ 点名红。**这条用例自己就是第 7 枚新用例**：它一落地总数就从 486 变 487，于是本轮所有文档里的数字必须在它写完之后再算一遍——这就是"改门要回头重算门自己数出来的那个数"的现例，`docs.numbers` 当场抓到过一次（先写 486，跑门才报 487）。**顺手拆掉第二类会漂的东西**：`docs/publishing-to-npm.md` 里原本有 13 处**跨文件行号引用**（`README.md:178-181` / `docs/desktop-support.md:265` / `CHANGELOG.md:88` 这一族），没有任何门守着它们，而本版在 README、CHANGELOG、desktop-support 三份文件顶部各加了内容——行号全体位移，旧指针就变成了「读起来像引证、指着不相干的段落」。本轮不重算那 13 个数字，而是**把它们换成节名**（「安装」一节 / 「已验证 / 未验证（诚实清单）」一节里的某某那条 / 10.9.1 版块）：版本块加在文件顶部推不动节名。换的过程里发现其中两条引的句子在原文里**已经找不到**（`本版对它们没有改代码`、`验证止于安装期放行`），一并按现存内容改写成当场能核对的说法。
+
+### 未验证 / 边界
+
+- **`channelAbsent` 的读数来自一台壳、一个时刻**：`measuredAt: '2026-10-12'`，壳内宿主字符串 `0.2.0-rc.2`。壳升级后基名会再掷一次——那时门会红在"继任基名被重掷"这一腿，这是设计意图（红得有名字），但**"壳更新之后这张表还成立"这件事本身没有被追过**。npm 半边同理，是 `0.2.0-rc.1` 的实装读数。
+- **todo 面板与队列坞在壳上的磨砂仍没修**：本版只让读数诚实。要把它换掉不能图省事用 `[class$="_dock"]`：现读壳里 `_dock` 后缀有 3 个基名（`v1kfCW` / `RlGAzG` / `nJdiTq`），其中 **`RlGAzG_dock` 就在 `skeleton/InputBar.module.css` 里**（composer 那一族），把 blur 加到它上面等于重赌一次 `lib/client.js` 材质模糊注释里那条回归（规则 1 的原文是 "the composer card … deliberately carries the stop / send button Tooltips — fixed popovers — and blurring it made them anchor to the card"）——成因正是"给 composer 一族加 `backdrop-filter`"（fixed 定位的 Tooltip 被拽进卡片坐标系）。可用路径已量到：**用 module 内唯一后缀反推前缀**（现读到 `RlGAzG_cardWorkspaceTrigger` 这类只属于单个模块的类名，可以据此在同模块内解出 `RlGAzG_` 这枚前缀），这条路属 Roadmap A1 未完成部分，本版不开工。
+- **壳上观感：0 次目视**。`channelAbsent` 是读数层的东西，它不改任何声明，所以目视能证明的只有"页面没坏"；**"四池的活页复测本轮没做"这半句在发布同日就被作废了**（见下面「发布读数」那条：19:44 用**浏览器 → 壳 serve 的 19387** 读到 `drifted: [] && notMounted: [] && channelAbsent` 恰两组 && `pending: false`；但**Electron 渲染进程内对 `10.12.1` 的机读仍是 0 次**，那要用户本人重启才有）。上一条 10.12.0 那次读到的 `drifted` 非空正是本版要消除的形状，所以那一格是**验收条件本身**，不是可省的步骤；**没人眼看过"todo 面板在壳上是什么样子"**。
+- 分类器仍**绝不 fetch `<link>` 样式**（零网络不变式）：模块 CSS 以 `<link>` 形态分发时该组回落 `drifted`。这条边界从 10.5.0 起一字未变。
+- `<style data-plugin-css>` 读法只看**类名 token 是否出现**，不看它属于哪个模块——宿主若在同一条自有 CSS 里以别的模块路径复用同名 token，归属会误判成 `notMounted`。本机两台宿主今天没有这种复用（本轮为建登记表逐模块列过类名），但这是一个**已知的宽松**，不是验过的性质。
+- Roadmap A1 **仍不销账**：卡片一族（`Mbwy4a_card` / `COMPOSER_HASH_CARDS = .uV2eYG_card`）仍有押哈希的写法，且探针**不覆盖**按需挂载的功能面（提问卡 / 授权卡）。
+
+### 发布读数（2026-10-12，发布之后补记）
+
+- 提交 `afa9747`（推送前远端多了一条 daily growth chart `bf942e6`，只动 `docs/stats.*`、与本次 19 个文件零交集 ⇒ `git rebase origin/main` 后普通 push，**没有**用 force）。tag **`v10.12.1`**（annotated）打在 `afa9747`、单 refspec 推送。
+- CI run **38240245310** 六作业全绿（`test` × Node 18/20/22/24 + `typecheck` + 计算样式门），门那一作业的日志里有读数行 `Engine measured 13 reading rows across host / desktop / coexist.` ⇒ runner 上是**量出来的**，不是空过。
+- npm：`+ dsh-dream-skin@10.12.1` / **24 文件** / shasum `452227344fcdea9da9d0c43c7de2a979139ddb2d` / integrity `sha512-k7iR2LaNFm/89…oBEd9pQlSrUjQ==`；registry 记的发布戳 `2026-10-12T11:08:28.308Z`，`dist-tags.latest` 已翻到 `10.12.1`。**读侧延迟又演了一次**：`npm publish` 打印完成的**当时**，`npm view dsh-dream-skin@10.12.1` 报 404 且 `dist-tags.latest` 仍是 `10.12.0`，几分钟后两处都对了——判"发出去了没有"照旧只看 packument 的 `time`。
+- **从 registry 真装一次**（Roadmap B6 那条清单腿）：临时目录 `npm install dsh-dream-skin@10.12.1` ⇒ 三读数 `10.12.1` / `PLUGIN_BUILD = "10.12.1"` / **24 文件**，安装物 lockfile 的 `resolution.integrity` 与发布回执**逐字符相同**；再 `grep -c channelAbsent` 在**发货的** `lib/client.js` 里读到 **14** 处——第四池确实随包出去了，不是只活在仓库里。registry 侧 `dist.fileCount = 24`、`dist.unpackedSize = 1071403` 同轮现读。
+- GitHub Release 已建（`v10.12.1`）。发布时现查开放 issue：`[]`（这次 `gh` **直连超时**，给单进程加 `HTTP(S)_PROXY` 后才读到——`gh` 不继承 git 的代理设置，所以"git 通了"不等于"gh 通了"）。
+- **发布之后才补的两处**（都是本轮评审欠的账，记在这里免得被当成发布前就-done）：① `docs/publishing-to-npm.md` 的「8.4 官方桌面 profile」"本机现状"按现场读数重写（🟠 T2 销账：原文自称现状却写着 `^10.9.3`，现场是 `^10.12.0`），并补了 2026-10-12 那条 registry 真装的读数；② 同一节里剩下三处**跨文件行号引用**换成测试标题（`#83: the previews are advertised from GitHub, not shipped in the tarball` / `bundle build matches package.json version`），本条上方那处 `lib/client.js:2558-2564` 一并换成注释原文。**代价要说清**：`docs/publishing-to-npm.md` 是在 npm `files` 白名单里的，所以**已发布的 `10.12.1` 包内那一节仍写着 `^10.9.3`**，要到下一版才对得上——以"现状"自称的段落必须带取数日期，且发布前重读一遍。
+- 桌面 profile：发布当日 19:39 由维护方按 `docs/publishing-to-npm.md`「8.4 官方桌面 profile」那条手工路装上 `10.12.1`（`pnpm add dsh-dream-skin@10.12.1 --config.minimumReleaseAge=0`，18 秒，一次 GET `ECONNRESET` 由 pnpm 自己重试扛住），装后现核 `^10.12.1` / `PLUGIN_BUILD = "10.12.1"` / 24 文件 / lock 的 `resolution.integrity` 与发布回执逐字符相同。**装的时候应用在跑（5 个 `DeepSeek Harness` 进程），维护方没有代关它** ⇒ 窗口里那个渲染进程加载的仍是重启前的 `10.12.0`，界面要用户本人重启才会是 `10.12.1`。
+- **同日 19:44 拿到四池的第一次活页读数**（通道：内置浏览器指向壳自己 serve 的 `http://127.0.0.1:19387`，不是 Electron 渲染进程）：`probed 8 / drifted [] / notMounted [] / channelAbsent 恰两组 / retired 3 / pending false / fadeMatches 1`，`status:"ready"`、`storageError:null`、控制台 0 条 warn/error。**`drifted: [] && notMounted: [] && pending: false` 这个组合此前从未在壳相关页面上读到过**（10.12.0 那次 `drifted` 是两项非空），"壳上那盏灯永远红"的形状就此消除。但 Roadmap 那条 M 的验收写的是 `… && channelAbsent: []`，而这两组在壳渠道里是真不存在——去哈希之前不可能为空 ⇒ **A1 仍不销账**。完整读数、`notMounted` 随侧栏收起/展开出现又消失的成因（首页态下会话列表根本没挂载），以及"晚修正路径第一次被观测到"，都写在 `docs/desktop-support.md` 的「官方桌面壳的活页机读通道」一节。
+- **同轮纠正一条判据**：那一节原有第 ② 项要"数 `style[data-plugin-css]` 来补证归属优先于登记表"，实测 `data-plugin-css` 有 **139** 张而我方按 `id^="dsh-dream-skin"` 只有 **2** 张（且这两张都**不带**该属性）——**`data-plugin-css` 是宿主的属性，不是我方的**。这与 `--dsw-` 命名空间那一族误算同形；判据改为只认 id 前缀。
+
+## [10.12.0] - 2026-10-12
+
+> **Roadmap A1（去哈希类名依赖）+ D2（外链壁纸空值态）。** A1 本来被记成一条**预防性**改动，先测再说之后它变成了缺陷单：那条「左侧栏底部断裂」的修正挂在 npm 宿主的构建哈希基名上，而官方桌面壳同一族表面用的是**另一个基名**，所以这条修正在桌面壳上**从来没有生效过**。合计 **229 项质量门全过**（217 调色 + 12 工艺），全套 `npm test` 461→**480 全绿**。
+
+### 一、先测：两台宿主对同一族表面各用不同基名（这就是缺陷本身）
+
+`_footArea` / `_settingsArea` / `_footerActions` 这一族在两台宿主上逐个基名现数（本轮复核时用两条独立路径各数了一遍：`tests/host.sidefoot.test.cjs` 的 `measureSideFoot`，以及一份 TEMP 里的临时脚本——**数字一致才写进这里**）：
+
+| 语料 | `_footArea` | `_settingsArea` | `_footerActions` |
+|---|---|---|---|
+| npm 实装 `@deepseek-ai/dsh` **`0.2.0-rc.1`**（1022 个 `.css/.js/.mjs`） | 基名 `hHd-Xa`，**6** 处 | `hHd-Xa`，3 处 | `hHd-Xa` 4 处 + **`Mbwy4a` 3 处** |
+| 官方桌面壳 `app.asar`（121,348,951 字节，内含宿主版本字符串 `0.2.0-rc.2`） | 基名 **`_2H3hWW`**，**6** 处 | `_2H3hWW`，3 处 | `_2H3hWW` 4 处 + **`mAtvLq` 3 处** |
+
+决定性的一件事：**`hHd-Xa` 在这个 asar 里出现 0 次**。也就是说 10.10.0 及以前那条 `.hHd-Xa_root .hHd-Xa_footArea, .hHd-Xa_root .hHd-Xa_settingsArea, .hHd-Xa_root .hHd-Xa_footerActions` 在壳上**匹配零个元素**——规则照样在材质表里、字符串断言照样绿、探针照样报 present，只是没有盒子来继承那三条 margin。**issue #97 的病灶原样复现，只是换了一个面**：上一轮是「宿主重掷哈希后规则静默失效」，这一轮是「同一份 CSS Modules 在两个发行渠道里基名不同」。前者是时间维度的漂移，后者是渠道维度的分叉，而两种在页面上的表现一模一样：什么都不发生。
+
+### 二、锚点：哈希无关的后缀 + **强制**后代作用域
+
+三枚常量替代那三条哈希写法（`lib/client.js`，紧跟 `FADE_REPORT_LIMIT` 之后）：`SIDEBAR_FOOT_SELECTOR = [class$="_footArea"]`、`SIDEBAR_SETTINGS_SELECTOR = [class$="_footArea"] [class$="_settingsArea"]`、`SIDEBAR_FOOTER_ACTIONS_SELECTOR = [class$="_footArea"] [class$="_footerActions"]`。材质表里那两条规则（对齐：`width: auto` + 右缘 `calc(-1 * var(--dsh-sidebar-inline-padding, 12px))` + `margin-left: -4px` + 对称填充；抹平：`background: transparent` + 去阴影 + 去描边）选择器改为这三枚的拼接。
+
+**为什么不能写裸后缀**：`_footerActions` 不是这一族独占——npm 上 `dsh-client-ui-user-questions` 自己声明了 `.Mbwy4a_footerActions`（语料 3 处命中、2 处声明），壳上对应的是 `mAtvLq`。裸后缀会去刮提问卡的页脚，正是 issue L1 的形状（我方规则涂了别人的面）。`_settingsArea` 今天不撞，仍然一并要求作用域：作用域是这条规则的**语义**（"这是脚区里的那层面"），不是对当前语料的运气描述。
+
+**为什么作用域能成立也要被钉住**：宿主的 JSX 确实把 `footerActions` 与 `settingsArea` 渲染在 `footArea` 里面——这一条不写死在注释里，由 `hostNestsFootAreas()` 从宿主自己那份 `dsh-client-ui-sidebar/lib/client.js` 现读（按括号深度只读该元素自己的 `children` 数组）。
+
+### 三、门①：宿主侧的宣称由宿主语料回答（`tests/host.sidefoot.test.cjs`，9 条，新文件）
+
+三个纯函数（`ourAnchors()` 从 bundle 反读三枚常量、`measureSideFoot()` 逐后缀按基名分组、`hostNestsFootAreas()` 读嵌套）+ 一个判据表 `checkSideFoot()`，四条**合成语料**腿在任何机器（含 CI，无宿主）上都跑：出现第二枚 `_footArea` 基名 ⇒ 红（地标不再唯一，后代作用域失去依据）；整族改名 ⇒ 每个后缀各红一条；脱掉 `actions` 的作用域 ⇒ 红，且**同一份语料上发货写法必须绿**（否则这条红只是"语料罕见"，不是"作用域要紧"）；宿主不再嵌套 ⇒ 红（后代组合器描述的树没了）。真语料两条腿：本机 npm 实装（`counts._footArea` 必须恰为 1，且嵌套必须读得到）与壳的 `app.asar`（断言**壳的基名与 npm 的不同**——这条正是"从来没有生效过"那句的钉子；两边若哪天共用基名，它会把这句话推翻而不是沉默）。两个出口照 issue #102：**语料缺席是具名 skip / 具名 notice，全部缺席才是红**。
+
+### 四、门②：像素侧由真实引擎回答（`npm run wash:check` 新增 `side` 组，9 判据）
+
+夹具页由宿主自己的 CSS 拼出真的 `_footArea` / `_settingsArea` / `_footerActions` 盒子（类名从 `hostSideFootClasses()` 现读推导，读不到就拒绝构建夹具），并在**同一页**放一个类名同样以 `_footerActions` 结尾、但**不在** footArea 里的诱饵元素（`.fixture-decoy_footerActions`，自带 margin / 填充 / 描边），再放一个**宿主自己写了负 margin 的兄弟** `._regionArea` 当几何对照。九条判据：`side-plane-aligns`（`margin-left` 读到 `-4px`）、`side-nested-surfaces-align`（两层面都通过祖先被命中，后代组合器在真引擎里成立）、`side-decoy-footer-untouched`（诱饵仍 `0px` / `rgb(7, 7, 7)` / `1px`——**作用域是有承重的，不是风格**）、`side-plane-not-wash-gated`（水洗态不得移动这个面，也不得碰到诱饵），以及下面五条**本轮自己抓出来补上的**：`side-host-foot-css-in-play`、`side-erase-wins-over-host-sheet`、`side-plane-aligns-right`、`side-padding-compensates-inset`、`side-plane-flush-with-host-region`。后三条是**关系式**而不是字面量：`side-plane-aligns-right` 要求 `margin-right` 恰等于 `-` × 这个盒子上现读的 `--dsh-sidebar-inline-padding`（实测 `-12px` / `12px`），`side-padding-compensates-inset` 要求左右两条负 margin 各自被同侧 padding 补回来且补的量等于宿主那个变量（实测 `4px`/`-4px`、`12px`/`12px`），`side-plane-flush-with-host-region` 要求这个面的 `getBoundingClientRect()` 左右缘与四条 margin **逐项等于**同页那个我方一条规则都不写的 `_regionArea`。
+
+**补这两条之前，这个组测的不是层叠。** 第一版夹具只把宿主的**类名**放进页面，没有把宿主**给这些类写的规则**放进来。而宿主确实写了（现读，npm 语料与壳的 asar 两边同形）：`.hHd-Xa_footArea{flex-direction:column;flex:none;display:flex}`、`.hHd-Xa_settingsArea,.hHd-Xa_footerActions{flex:none;width:100%;min-width:0}`。于是当时那五条读数全部是"我方规则作用在一张白纸上"的结果，而真实页面上我方那条地标分支是 `(0,1,0)`——**和宿主自己那条 `.hHd-Xa_footArea` 同一特异度**，胜者由**文档顺序**决定，不是由我们 bundle 里的任何东西决定。这是 10.9.2「声明相等≠像素相等」的同族：**夹具相等≠页面相等**，而且比它更隐蔽，因为这里连"读了两层还是三层"都对，读的是一张根本没叠起来的纸。
+
+补法与它自己的两条变异：夹具新增 `<style id="fixture-host-foot">`，内容是经 `hostSideFootRules()` 从宿主侧栏 CSS **逐块抽出**的规则（带 `@media` / `@supports` 条件的块**不复现而是记账**，见本节末段），位置在 `#fixture-chrome` 之后、`#plugin-material` **之前**，复现真实页的顺序；读不到任何一条就**拒绝构建夹具**（不补一份手抄的宿主规则）。`side-host-foot-css-in-play` 读 `display` / `flex-direction`——**这两个属性我方一个字都不写**，所以它们只可能来自宿主；读到 `block` / `row` 就是宿主那块没了、整个组退回"关于一张纸的断言"。`side-erase-wins-over-host-sheet` 读 `footBg` / `footShadow` / `footBorderTop`，它是一条**金丝雀**：宿主哪天给这个面加一层比 `(0,1,0)` 更硬的绘制、或把自己的表排到我方之后，它就会红。两条变异各自只让该红的红：把宿主块换成一条不碰这个面的规则 ⇒ 只有 `['side-host-foot-css-in-play']` 红（其余八条读数一字不动——这正是"没有这条腿就会全绿"的实证）；给宿主块追加一条 `.hHd-Xa_footArea.hHd-Xa_footArea{background:rgb(9, 9, 9)}`（同元素双类 = `(0,2,0)`）⇒ 只有 `['side-erase-wins-over-host-sheet']` 红，且实测 `footBg` 立刻读 `rgb(9, 9, 9)`。**这条门能红，才说明"我们的抹平在那台机器上赢"是量出来的而不是推出来的。**
+
+**第二条欠账：右边缘那条判据当时比的是我方自己的兜底值。** 第一轮对抗评审指出来的一句话缺陷：`side-plane-aligns-right` 读 `footMarginRight` 并要求它等于 `-12px`，而那个 `-12px` 同时出现在**我方规则**的 `var(--dsh-sidebar-inline-padding, 12px)` 兜底里——夹具页上宿主那条声明变量的规则根本不在页面里，于是变量解析到我方写的 `12px`，判据变成"**我方写的数等于我方写的数**"，也就是本仓库记过的老账（手抄常量必须由独立数据源反算）。补法：`hostSideInsets()` 从宿主侧栏 CSS 里现读**声明 `--dsh-sidebar-inline-padding` 的那条规则**和**宿主自己写了负 margin 的 `._regionArea`**，两者都进夹具（读不到任一条就拒绝建页，不补手抄的），并把三条判据改成关系式。它们各自配一条"必须绿"和一条"必须红"的成对变异，这正是关系式与字面量的分水岭：把**宿主**的 `12px` 改成 `9px` ⇒ 整组**全绿**，实测 `insetVarOnFoot` 读 `9px`、`footMarginRight` 读 `-9px`（宿主动了，我方跟着动，判据不动）；在同一个 `9px` 的宿主上把我方那条换成写死的 `margin-right: -12px` ⇒ 恰好 `['side-padding-compensates-inset','side-plane-aligns-right','side-plane-flush-with-host-region']` 三条红。**这就是"写死"今天会造成的漂移形状，而它以前一条门都抓不到。** 顺带现读到一件该记的事：宿主的 `.hHd-Xa_regionArea` 自己写的就是 `margin-left:-4px;margin-right:calc(-1 * var(--dsh-sidebar-inline-padding));padding-left:4px`——我方这组数值不是发明，是**抄了宿主对同列兄弟的既有约定**；这一条同时修正下文「未验证」里"三个数值是我们的设计决定"那句的口径（决定的是"要不要跟齐"，不是那三个数）。
+
+其余四条引擎变异同样各自只让该红的红（**每条都点名翻红的判据 id 集合**，实测）：删掉 `margin-left: -4px` ⇒ `['side-nested-surfaces-align','side-padding-compensates-inset','side-plane-aligns','side-plane-flush-with-host-region']`；删掉 `margin-right: calc(…)` ⇒ `['side-padding-compensates-inset','side-plane-aligns-right','side-plane-flush-with-host-region']`（左、右各删一条，红的集合不同 ⇒ 一次翻红只指一个关节，而不是"什么都动了"）；脱掉 actions 作用域 ⇒ 只有 `['side-decoy-footer-untouched']`；宿主改名（`_footArea`→`_footRegion`）⇒ `['side-nested-surfaces-align','side-padding-compensates-inset','side-plane-aligns','side-plane-aligns-right','side-plane-flush-with-host-region']` 五条全红，**而选择器在表里、在探针列表里、在本仓库每一条字符串断言里都还"在场"**——这一条是文本门永远看不见的失效形状。
+
+**还有一处是"记下来"而不是"修掉了"。** `background` / `box-shadow` / `border` / `width` 这四条声明在今天的宿主 CSS 上**删掉什么都不会红**：宿主对这三个类根本不写这四条属性，而我方抹平要的正是它们的默认值，所以引擎上没有对手。这个事实被写成一条**具名的不覆盖用例**（四条循环，断言 `redIds === []`），而不是留成"看，九判据全绿"的错觉——抹平那一半的钉子是工艺门 `side-foot-hash-free`（白名单 + 恰好两条）和 bundle 字符串断言；**只有当宿主开始抢这个面时它才轮到引擎管**，而那一天该红的是 `side-erase-wins-over-host-sheet`（上面腿②已经证明那个关节能红）。同理，`padding-left` / `padding-right` 两条在补出 `side-padding-compensates-inset` 之前也没有任何读数会动——删掉它们等于让内容贴到列缘，而门一片绿。
+
+**第三轮补的是提取器自己。** 给「选择器被悄悄丢掉」加门时才发现：`hostSideFootRules()` 用的是 `/([^{}]+)\{([^{}]*)\}/` 这种平铺扫描，它**看不见 `@media` 的嵌套**——at-rule 前缀根本没被当成选择器读进来，而是整段跳过，于是里层的脚规则被**当成无条件规则复现**。现读到宿主确实有一条：`@media (prefers-reduced-motion:reduce){… .hHd-Xa_railIn .hHd-Xa_footArea{transition:none;animation:none}}`。今天把它复现出来是无害的（夹具页里没有 `_railIn` 祖先，选择器不匹配；`transition` / `animation` 也不是任何判据读的属性）——**但"无害"是量出来的结论，不是运气**：宿主哪天把 `margin-left` 搬进 `@media`，夹具就会把一条条件规则当永恒规则用，这正是本节开头「夹具相等≠页面相等」的另一条来路。改法是换成带深度的块扫描（`walkCssBlocks()`），条件块一律**不复现、只记账**：实测复现 **9** 条无条件脚选择器、跳过 **1** 条条件块（其属性 `transition` / `animation` 逐条对照判据读的十个属性，碰上一个就**拒绝建页**）。用例里的账目由**测试自己那份独立 walker** 重算再对上，不是复述提取器的返回值。同一轮补的第二件事：夹具把四段 CSS 原文插进 `<style>`，其中两段来自宿主 bundle——一个 `</` 就会提前关掉样式元素，读数照样像样而页面已经不是那张页面；现在这四段各有一处中毒用例要求**拒绝建页**，并同时断言真夹具照旧要能建成（否则这条腿也是空转）。
+
+### 五、门③：工艺门 `side-foot-hash-free`（11 → 12）
+
+候选集**同时**收类名写法与后缀写法（`mentionsFoot()` 两条分支都算），因为只审后缀就是 issue #97 藏身的那道洞——哈希形的兄弟规则可以在门自己看不见的车道里活着。判据四件：每个分支必须有哈希无关分支；两层面必须写在 `_footArea` 作用域之下；任何分支再出现 `.<base>_foot*` 形态直接红（A1 已退役这写法）；规则**恰好两条**。属性走**白名单**（`width` / `margin-right` / `margin-left` / `padding-right` / `padding-left` / `background` / `box-shadow` / `border`）而不是黑名单——10.9.1 的教训是黑名单只拦得住有人想到的名字，`transform` 当时径直走了过去；四腿变异里专门有一条"塞进 `transform: translateY(-9px)`"和一条"多长出一个没人决定过的第三条规则"（形状门兜不住**数量**，只有恰好两条这条兜得住）。
+
+### 六、顺带量到：文件面板一族在两台宿主上都是 0 命中
+
+`.nArs4W_panel` / `_pane` / `_paneContent` / `_workbench` / `_explorerBody` 与 `.bqrRRG_card` 在 npm 语料和壳的 asar 里**各 0 命中**（不是漂移，是整套词汇没了）。现代文件面板在 `dsh-client-ui-sidebar-files`，自带 `data-files-root` / `data-files-body` 稳定戳（本轮现读：两台各 1 处），且它的 root/body/row **自己不画背景**。它原本的意图（右栏与左栏同色）已由 `[data-sidebar-right-panel] [data-dockkit-*]` 那条**宿主稳定戳**规则承担——那条在壳的 asar 里 7 处命中、`data-dockkit` 111 处。所以这一半不是"换锚点"而是"确认已被覆盖 + 把死锚点留在带日期的豁免里"：直接删会让 Roadmap 仍声称支持的 `0.1.x` 线静下来。**Roadmap A1 不销账**：卡片一族（`Mbwy4a_card` / `lXshSW_root` / `_7yHdaG_panel`）仍有押哈希的写法，而验收条件 `anchors.drifted: [] && pending: false` 至今**没有在活页面上读到过**（见文末未验证）。
+
+### 七、D2：选了「图片链接」而框里还没有链接时，界面以前一个字都不说
+
+这一档在 `url` 为空时**不画任何背景**，用户看到的是"设了壁纸却没有壁纸"，而界面没有任何解释。现在补一行条件提示（8 语言各一行 `bg2.urlEmpty`）：说的是**用户此刻该知道的那半**——不是"壁纸被删了"，而是"这一档从来没有值，粘贴链接后点应用"。门是 `client.storage` 的新渲染用例，断言**双向**：`{kind:'url', url:null}` 必须出现该行；`{kind:'url', url:'https://…'}` 与 `{kind:'image', url:null}` 必须不出现。两条源码变异：守卫恒假 ⇒ 该行消失（静默降级复现），丢掉空值判定 ⇒ 有链接也报警（**只钉前一条会放过一个永远显示的警告**）。`t` 走标记函数，所以硬编码中文串在这里过不了。
+
+### 八、探针、census 与三处连带
+
+`MATERIAL_SELECTOR_PROBES` 的侧栏那一组换成三枚常量的拼接，**组数仍是 8**（`docs/desktop-support.md` 的 `probed:` 字段照旧由 `docs.numbers` 现场数数组元素得出）。census 重新生成（`measuredAt: 2026-10-11`）：我方树上的哈希站点 84 → **80**、基名仍是 **9** 枚——`hHd-Xa` 是被本轮的**引文**带回 `hashes.bases` 的（`files: 1 / packages: 1`：宿主确实有这一枚基名，所以旧写法在 npm 那条线上不是死锚点，只是换一个发行渠道就对不上）。**收口时又重生成了一次，读数变成 89**，多出的 9 处全部是本轮**正文里引用**的哈希名（`CHANGELOG.md` 28 / `README.md` 5 / `docs/desktop-support.md` 6 / `docs/design-philosophy.md` 4），不是发货面回来了——发货面 `lib/client.js` 两次都是 **46**。这两个数分开的意义就在这里：这张表管的是"我们说过哪些哈希"，那一列管的是"我们发货哪些哈希"。**另记一条口径**：`measuredAt` 用的是 UTC 日期（`new Date().toISOString()`），而版本号的 `M.D` 用的是 UTC+8——跨过午夜生成 census 会看到" stamp 比版本早一天"，这不是 bug，是两套日期口径，别把它当数据陈旧。真正变了的是发货面：**`lib/client.js` 的哈希站点 61 → 46**（−15，正好是 `hHd-Xa` 那 15 处），这一条才是 A1 这一半的验收读数。`lib/client.js` 里点名该基名的注释已清零（grep 计数 0；它仍留在 `scripts/` 与 `tests/` 的说明文字和变异字符串里，那是门的靶子不是发货面），`tests/hashes.test.cjs` 的第 92.2 条变异因此换成一个仍在表里的基名——**旧哈希现在已经不构成"写回哈希"的证据**，这本身就是 A1 的另一条验收读数。census 的 `ruler` 同时改正：它过去说这张表 "enumerated from our own shipped surface (lib/ + the published docs)"，而 `scanTargets()` 实际还扫 `CHANGELOG.md`——**门的文案把自己的扫描范围写小了**，现在按 scanTargets 逐项点名，并写明"一个基名可能是被日期化的引文带进表的，那一行说的是宿主测到什么，不是我们发货什么"。`client.smoke` 那两条侧栏断言从"字符串在场"改成**条数**（该锚点作为选择器出现恰 2 次）+ 两条"不得有 class-form 锚点"的禁词腿。
+
+### 九、CI 形态复跑抓到的第二实例：共享的 `findHostRoot()` 也把空目录当宿主
+
+新门写完不等于这课学完了。收口时按 10.10.0 的规矩把**整套件**在「这台机器没有宿主」的形态下重跑一遍（`DSH_HOST_ROOT` 指向一个不存在的目录），拿到 **474 定义 = 450 通过 + 21 具名 skip + 3 失败**（这是当时那一次的读数；此后 §四 的层叠补门与本轮末了新加的一道 CHANGELOG 结构门把套件抬到 **480**，收工读数见「门与账本」）——那 3 条红不是新门，是 `tests/hashes.test.cjs` 的 #92 / #94 与 `tests/host.gap.test.cjs` 的 #88，报的都是 `ENOENT: … no-host\dsh-client-ui-theme\lib\client.js`。查下去是同一个病灶的**第二个实例，而且比本轮新文件那一处更靠前**：`scripts/host-consumers.cjs:findHostRoot()` 的判定只到 `statSync(candidate).isDirectory()`，**一个空目录就算通过了**，于是各文件那句 `try { findHostRoot() } catch { t.skip(…) }` 的守卫**根本没有触发**（它返回了路径），失败发生在 60 行之外的 `measureGap()` 里——抛异常的是**取宿主这一步**，任何按 issue #102 立的两个出口都兜不住。10.10.0 首轮 CI 翻红的是"新用例假设宿主在场"，这一轮翻出来的是"**共享 helper 假设目录里有宿主**"：同一条纪律，换了层。
+
+修法与它自己的反向用例：`findHostRoot()` 现在要求 `themeEntryPath(root)` 这个**建表非读不可的文件**真在场才算宿主——标记走 `host-colour-tokens.cjs` 那一个出处，不在本文件里再抄一遍路径（两份清单会漂，这是本仓库记过的老账）。**显式 `DSH_HOST_ROOT` 被拒时直接报错、不再往下走候选**：悄悄改用机器上的全局安装，等于交出一份"看着像用户指的那台"的读数。报错把被拒的路径与原因都点名（`a directory, but no dsh-client-ui-theme/lib/client.js inside`）。新增用例在 `tests/host.gap.test.cjs`，三条断言各自堵一种蒙混：① 空目录必须被拒；② 被拒的原因必须点名这个路径、且**Rejected 只有一项**（否则就是悄悄回落到别的安装）；③ 撤掉覆盖后对照面照旧（要么解析出真宿主并 stat 到标记文件，要么给出那条具名的 `host not found`）。**修前红实测过**：把 `git show HEAD:scripts/host-consumers.cjs` 取出来单独加载，同样的空目录下它 `returned "C:\\…\\dsh-empty-host-LTEn8i"`——也就是 ① 那条断言在修复前必红，不是"我当时手工验过"。修后同一形态重跑，那 3 条不再是红。
+
+### 十、收口时撞到的第三个实例：一整块发布记录从 CHANGELOG 的结构里消失了，而门全绿
+
+插新版本块的时候，把 **`## [10.10.0] - 2026-10-10` 这一行标题覆盖掉了**：10.10.0 的整段内容一个字没丢，只是变成了 10.12.0 那一块的延续。现成的门没有一个看得见这件事——`docs.numbers` 读的是 CHANGELOG 里带「项质量门」标记的那一行（它还在），`readme.roadmap` 管 Roadmap，`desktop.claims` 管兼容表，`repo:eol` 管行尾。**一整套用例 + 12 道工艺门在一个"已发布版本从变更日志的结构上不存在"的仓库上全绿。**
+
+补法是一条结构不变量 + 两条**分别点名由哪条腿接住**的变异（`tests/docs.numbers.test.cjs` 的新用例）：发布块的小节标题每块都从 `### 一、` 重新开始，所以**标题一旦丢了，上一块的计数就会从 `九` 回到 `一`**——这是这件事唯一的可见指纹。两条变异按位置归因写死：删**最新块**的标题时计数腿必须不红（它上面没有块可以吞），必须由「最新块版本号 == `package.json` 的 `version`」那条腿接住；删**下面某块**的标题时计数腿必须红、且版本腿必须不动。不写成"随便红一条就行"——那种循环在砍掉任意一条腿之后照样全绿。**边界照实记**：这条不变量只管用 `一、二、三…` 编号的块（本轮与 10.10.0）。`10.9.3` 及更早的小节是**不编号**的 `###`（实测：全文件 `### Added` 与 `### Fixed` 各 **0** 处，10.9.3 那一块用的是「取证：…」「修复」「门」「未验证 / 边界」这一族标题），同一把尺子量不到它们——所以它兜不住旧写法的标题丢失，兜住的是"新写法 + 忘记加 / 覆盖掉新版本块"这一支。
+
+**这条门自己的第一版是假门**，而且抓它的正是它自己的变异腿：我写的是 `if (!s || last === 0) continue;`，于是每块第一个 `### 一、` 被跳过、`last` 永远停在 0、后面每一条也都被跳过——**这个函数对任何文件都返回空**。删掉 `## [10.10.0]` 的那条变异当场拒绝变红，才看出问题在判定而不是在文件。本仓库记过的第 1 号自纠形状（"永远绿"的门是被变异抓出来的，而且常抓的是我自己刚写的那条）第四次原样复现。
+
+**同一个事故的第二半：scope 的边界把我方自己的正文当成了标题。** 补完 §十 才发现 `docs.numbers` 的"当前发布块"边界是 `line.includes(until)`，而 §十 那句话里正好用反引号写了 `## [10.10.0]` 这一行——门把**提到**它的那句正文当成了块尾，于是块尾以下的所有宣称（包括 `质量审计 229/229` 那一条）一律读成"宣称被删掉了"，报红。这不是门太严，是门的边界条件写成了"字符串出现过"：任何解释标题丢失的句子都会踩到。改成 `startsWith`（两处 `from` / `until` 都按行首匹配），并补一条对照用例：把"包含但不以它开头"的引用行注进块里，宣称必须**照旧读得到**；用例同时断言注入行确实"contains 而不 startsWith"，否则那条腿是空转。`docs.numbers` 本轮因此共 **+2** 条（块结构门 + 这条 scope 对照）。
+
+### 十一、对抗评审（降级模式）自己抓出来的一条：关系式判据会把"双双读不到"当成"一致"
+
+本轮按用户要求跑了一次**三方对抗评审**（蓝军 → 第三方 → 裁定）。因为用户明确要求不再派生子代理，三角色由同一个 agent 串行扮演，所以这是**同模型不同角色的对抗审查**，不是"独立第三方验证"。三份报告落盘在 `docs/review/`（该目录已 gitignore，刻意不发布；README/CHANGELOG 也不引用它们，避免死链与"自我认证"的错觉）。
+
+最值得记的一条不是蓝军抓的，而是**裁定环节对三方共同前提的审查**：`side` 组这一轮补的是**关系式**判据（"我方那个面与宿主自己的兄弟面在同一条线上"），而关系式有一类等式判据没有的洞——**两个数都读不到时它们相等**。现读到探针在元素缺失时回答字符串 `MISSING`，于是 `footRectLeft === regionRectLeft` 在"两个盒子都不在场"时为真。当时同组另外两条腿会因为 `-4px` 对不上而红，所以整组不会假绿——**但一条判据不能靠兄弟腿替自己守前置条件**，那正是"这个组是绿的"悄悄退化成"某条腿是绿的"的地方。
+
+修法与它自己的证据：`side-plane-flush-with-host-region` 与 `side-plane-aligns-right` 各加前置条件（`MISSING` / 空串一律判红），并新增一条**合成读数**用例（不需要浏览器 ⇒ 在无宿主、无浏览器的机器上照跑）把四种形状钉死：健康 = 真、双双缺失 = 假、单侧缺失 = 假、右缘差 4px = 假。
+
+同一轮裁定还**更正了自己写下的判断**：它曾把"工艺门『恰好两条』从未被变异证明"列为待补项，读码后发现 `tests/craft.quality.test.cjs:166` 早就往表里种了第三条脚规则并要求 `side-foot-hash-free` 判红，另配"真发货表必须绿"的对照。**评审记录里"没人证明过"这类句子，必须先去证明清单核对再说**，否则合并清单会把已经完成的工作重新写成欠账——本仓库第 9 号自纠形状（清单按出口核对）换了个方向复现。
+
+### 十二、发版那一刻的现查读数（含 registry 读侧延迟的一个新形状）
+
+- 提交 `21df82b`（rebase 到远端那条 daily `116709a` 之上，无文件交集）→ `main` 推送成功。CI run **38165778220** 六作业全绿（`typecheck` + `test` 18/20/22/24 + `Computed-style gate`）；`wash-gate` 日志里 `wash cascade OK` 出现 **2** 次（一次是引擎自己那行读数，一次是 belt-and-braces 那条 grep 命令被回显），即这一轮在 runner 上**有读数**而不是空过。
+- tag `v10.12.0` 打在 `21df82b` 上，单 refspec 推送。发布时现查：`gh issue list --state open --json number` → `[]`，`gh pr list --state open` → `[]`。
+- npm：`+ dsh-dream-skin@10.12.0` / **24 文件** / 381.6 kB / shasum **`bd69ffd182f950725fea7a8acf460f2b933fa8ac`**。registry 记的发布戳是 `2026-10-11T19:00:57.102Z`——比 `npm publish` 打印完成**晚约 4 分钟**，这是 registry 处理完成的时刻，对外报发布时间以它为准。
+- **读侧延迟的新形状（比 10.10.0 那次的"单版本 endpoint 404"更绕）**：`dist-tags.latest` 与 `time['10.12.0']` 在同一份 packument 里已经翻到 10.12.0 的**同一次读取**中，`versions['10.12.0']` 仍然是缺的（`npm view dsh-dream-skin --json` → `versionsKey=false / timeKey=true`）。所以"packument 里 `versions` 有没有这一条"**不能**当"发出去了没有"的判据；判据用 `time`，终局确认走 `npm view dsh-dream-skin@10.12.0 dist.shasum`（回 `bd69ffd1…`，与本地 `npm pack --dry-run` 逐位相同）。
+- 按 `docs/publishing-to-npm.md` 8.2 在一次性 profile 里从公共 registry 真装一次（24 小时窗口内，带 `--config.minimumReleaseAge=0`）：装后 `package.json` = `10.12.0`、`lib/client.js` 的 `PLUGIN_BUILD = "10.12.0"`、**24 文件**，`scripts/` `tests/` `CHANGELOG.md` `docs/screenshots` `docs/previews` **全不存在**，lockfile 的 `resolution.integrity` 是 `sha512-hT/TCdqtC9Pg7…Wez1Pirqz2C2w==`，与本地打包的 integrity 首尾一致 ⇒ 发出去的就是建出来的那个东西。装完把临时目录删掉，日常 profile 一个没碰。
+- **没做的事**：桌面 profile 没装（用户没要求，且那会改动 `~/.dsh/profiles/desktop`）；运行中的 DSH 实例一个字没动，A1 的壳上观感因此仍是 0 次目视（见「未验证 / 边界」）。
+
+顺带一条关于 §十 那道结构门的现读边界：它的编号正则 `^### ([一二三四五六七八九十])、` 是**单字符**字符类，所以 `### 十一、` / `### 十二、` 这种两位数编号**它读不到**。本轮不影响判定（一块里能被读到的最大编号是 `十`，丢标题仍会让 `十 → 一` 回退被抓），但这条边界得写下来而不是等哪天靠两位数编号的块来发现。
+
+### 门与账本
+
+回归门 **480/480**（10.10.0 为 461）。+19 由套件现场加载数出来、按文件拆开记：`host.sidefoot` **9**（新文件）+ `craft.quality` **1** + `wash.cascade` **5**（对齐族四条变异那条 + §四 补的层叠与关系式六条那条 + 提取账目那条 + 注入面拒绝那条 + 几何腿前置条件那条）+ `client.storage` **1** + `host.gap` **1**（§九 那条入口拒绝）+ `docs.numbers` **2**（§十 的 CHANGELOG 块门 + 「引用不能当 scope 边界」的对照）；`client.smoke` 是**换形状**不是加条数（仍 135 条），所以不进这个加法。质量审计 **229/229**（217 调色 + 12 工艺），工艺门新增一枚即 `side-foot-hash-free`。本轮新增**变异 32 处**，全部是套件里能重跑的用例：工艺门 4（哈希锚点写回 / 脱作用域 / 塞 `transform` / 长出第三条）+ 引擎对齐 4（删左 margin / 删右 margin / 脱作用域 / 整族改名，各自点名翻红的判据 id 集合）+ 夹具层叠与关系式 6（宿主块换成不碰这个面 / 给宿主块加一条 `(0,2,0)` 的绘制 / **把宿主的 inset 从 `12px` 搬到 `9px` 并要求整组仍绿** / 同一个 `9px` 宿主上把我方写成 `-12px` 并要求三条右缘判据红 / 删 `padding-left` / 删 `padding-right`）+ 宿主形状 5（第二枚基名 / 整族改名 / 裸后缀配共享后缀 / 不再嵌套 / 已扁平化的树不许读成嵌套）+ D2 源码 2（恒假 / 丢掉空值判定）+ CHANGELOG 结构 2（删最新块标题 / 删下面某块标题，两条各点名必须由哪条腿接住）+ scope 边界对照 1（把下一块标题当引文写进正文，宣称必须照旧读得到）+ 夹具提取与注入面 6（`@media` 里带被读属性的脚规则必须拒绝建页 / 选择器列表里部分丢弃必须拒绝 / 四类注入字符串各塞一处 `</` 都必须拒绝建页，真夹具照旧要能建成）+ 几何腿的前置条件 2（两个盒子双双 `MISSING`、变量解析成空串，都必须红——相等判据不许把"都没读到"当成"一致"）。另有 **4 处具名的"不覆盖"循环**（`background` / `box-shadow` / `border` / `width` 删掉后断言 `redIds === []`）——它们不产生红，产生的是这句"这里今天没有覆盖"的读数本身。另有两处**门的入口判定**修正各配一条反向用例：新文件自己的 `hostRoot()` 与 §九 这条共享的 `findHostRoot()`——同一个病灶的两个实例，都要求"真读得到那个包"才算语料可用，都不许把"这台机器没有宿主"报成"检查失败"。`skin:check` / `host:census:check` / `previews:check` / `repo:eol` / `typecheck` 全绿；`npm run wash:check` 严格模式本机实跑 exit 0，判据组名单由门核对为 `['corner','desktop','fade','side']`（新增一组必须改这里，否则整组静默不跑）。
+
+### 未验证 / 边界
+
+- **A1 修正在官方桌面壳上的观感：0 次目视。** 证据止于"读它发货的 CSS 原文 + 在真实引擎里重演"（`side` 组九判据）。壳加载新代码要用户本人重启该应用，本轮没有动运行中的实例。
+- **`anchors.drifted: [] && pending: false` 从未在活页面上读到过。** 这是 Roadmap A1 的验收条件，所以 A1 只记"侧栏脚区已去哈希"，整条不销账；卡片一族仍是哈希写法是另一半原因。
+- 侧栏那组 margin / 填充：**数值不是我方发明的**——现读到宿主的 `.hHd-Xa_regionArea` 自己就写着 `margin-left:-4px;margin-right:calc(-1 * var(--dsh-sidebar-inline-padding));padding-left:4px`（见 §四），我方是把同列的脚区对齐到宿主对兄弟面已有的那套约定。所以门现在比的是**宿主那条规则**而不是我方写的数。仍然属于决定的只有两件事：**要不要跟齐**，以及右侧那条 `padding-right`（宿主对 region 没写这一条，是我们补的）。门只保证"这三条只可能是这六条属性 + 恰好两条规则 + 右缘等于宿主的变量"，不保证好看。
+- **`side` 组对四条声明今天是"知道覆盖不到"而不是"覆盖到了"**：`background` / `box-shadow` / `border` / `width` 在这套宿主 CSS 下删掉不产生任何红（宿主不抢这个面，抹平要的正是默认值）。这一条已写成具名的不覆盖用例，见 §四末段。
+- 夹具**不复现条件规则**：宿主的脚规则如果落在 `@media` / `@supports` 里，`walkCssBlocks()` 会把它**跳过并记进 `hostFootConditionalSkipped`**（今天恰好有 1 条：`prefers-reduced-motion` 下的 `transition` / `animation`）。边界因此是"夹具与真实页差一条被跳过的条件规则"，而不是"条件被当成永恒"——只有当被跳过的声明碰到判据读的十个属性之一时门才拒绝建页。也就是说：**今天这条被跳过的声明，引擎侧没有覆盖**，它靠的是"没人读它"这个现读事实。
+- `host.sidefoot` 的壳腿依赖本机安装的官方桌面壳：`app.asar` 不在时**具名跳过**。CI 上跑到的是合成语料那五条 + 逻辑门，"两台宿主基名不同"这一条**不因此在 CI 上被重新证明**。
+- 诱饵元素证明的是"作用域在**当前宿主 CSS 形状**下兜住了共享后缀"，不是"宿主永远不新增第二枚 `_footerActions`"；后者由 `host.sidefoot` 的第一条合成腿在语料真长出第二枚 `_footArea` 时翻红，而 `_footerActions` 长出第三枚基名 today 只红在"我方脱了作用域"这一条件上。
+- **`</` 守卫只加在 corner/side 那份夹具**（现读：另外两份夹具插进页面的只有类名——被形状正则限定——与我方常量表，没有宿主 CSS 原文）。**如果将来也把宿主 CSS 搬进去，守卫不会自动跟过去。**
+- 块扫描会先剥 CSS 注释；遇到**未闭合**的 `/*`，下一条选择器会被粘进注释残段，结果是提取器判"不可复现"而**拒绝建页**（实测行为是响的，不是静默少复现）。
+- 关系式判据（`footRectLeft === regionRectLeft`、`footMarginRight === '-' + insetVarOnFoot`）现在各自带前置条件（`MISSING` / 空串一律判红）。仍然要说清楚：**它们证明的是夹具页里的层叠关系，不是官方桌面壳上的像素**——壳上仍 0 次机读、0 次目视。
+- 页权锁 / 两代纤维的热重载仍**没有在真页面上演过**（同 10.10.0 的边界，本轮未触及）。
+
+## [10.10.0] - 2026-10-10
+
+> **这一版没有新的视觉决定。** 上一轮改的是那条带子画几层，这一轮改的是**证据本身**：把"我看到了"变成别人能复算的东西，并把评审留在本地待办里的四条欠账（不是用户报的，是我们自己记下的）一次清完。回归门 **413 → 461**（+48），质量审计 **228/228**（217 调色 + 11 工艺，门数不变）。
+
+### 一、10.9.3 的像素效果拿到第一次目视
+
+报告人在官方 DSH Desktop 的 desktop profile 上看了那条带子，回执「现在好了，我看到已经正常了」。**"他看到的是不是 10.9.3"这一步是当场排除的**：安装副本 `node_modules/dsh-dream-skin/lib/client.js` 落盘 `2026-10-09T11:57:09Z`（本地 19:57:09）、该文件 `PLUGIN_BUILD = "10.9.3"`、两层简写在安装副本里在场、profile 依赖范围已从 `^9.29.0` 抬到 `^10.9.3`；`DeepSeek Harness` 进程启动于 `2026-10-10 19:25:01`——**进程比文件新约 23.5 小时**，所以不是旧版残影。**这一眼仍不足以把 `docs/desktop-support.md` 那一格升上去**：它是人的读数，Electron 渲染进程内部的机读次数仍然是 **0**。可复现性分两半写清楚：进程时刻取自当晚那一次运行、撰写时应用已关闭无法重取；落盘那一半任何时候可复核。
+
+### 二、债务①：计算样式门不再自己抄颜色
+
+`wash:check` 的 `corner` 组原先在夹具里**手抄**了两枚 token 的颜色值。这是自证式探针的形状——门拿自己抄的常量去验自己抄的规则，宿主改了色它照样绿。现在颜色由 `cornerTokens()` **从发货 bundle 现读**（读不到就抛 `would have to INVENT the colour it claims to measure`，绝不补一个默认值），这条口径随后也套到**同门的 `coexist` 夹具**（评审 B-02 指出只修 corner 是"修了一半"）：那页 HTML 里原先也写死了 `--dsw-alias-bg-base` 与 `--dsw-specific-sidebar-fill` 两枚颜色，现在同样由 `cornerTokens()` 现读，且**拿不到 token 就抛**——一个声称"我们的规则压过他们那一条"的夹具，不该用自己抄的常量决定胜负。两处夹具之外仍留在文件里的 `rgba(7, 7, 7, 0.25)`（`DESKTOP_SWEEP`）**性质不同**：它不是"测来的宿主颜色"，是我们自己写进 `--dsw-specific-sidebar-fill` 的哨兵值，夹具与判据表共用同一个常量，所以它没有"独立数据源"可反算，也不自称是实测。随附两条用例：一条钉拒绝面，一条是**活页变异**——把 nebula 的 canvas token 换成 `#010203` 后，水洗态的带子与内容列**两处读数一起搬**（`rgba(1, 2, 3, 0.4)`），而 plain 态带子仍读侧栏那枚 token。这条变异同时把 10.9.3 的哨兵结论（带子跟 canvas、不跟 sidebar）从"文档里的一段话"变成"每次跑套件都会重演的一次改写"。**代价照实写**：这一改动让历次文档里引用的 `rgba(16, 16, 24, 0.75)` / 合成 `rgb(68, 68, 74)` 一族读数失去可复现性——它们是手抄颜色时代的实测值；当前夹具的实测值是 plain `rgba(17, 15, 20, 0.75)`、wash 两侧同合成 `rgb(70, 68, 72)`（各 3 层）。历史条目不逐条重写，只在 `docs/desktop-support.md` 的取证行里集中作废。
+
+### 三、债务②：`sleep(400)` 一族改成等收敛
+
+持久化用例里有若干处"睡 400ms 等 debounce 放行再断言"。睡够时长只是**大概率**等到：机器忙时它兜不住，机器闲时它把断言变成对瞬时状态的采样。现在改用 `waitFor(converge, …)` 轮询到**终局判据**本身，永不收敛就点名最后一次观测值并判红（`do not paper over this by sleeping longer`）。两处 `waitFor` 自测（`client.smoke` / `client.persistence` 各一条）不是装饰——它们钉的是"轮询器在条件从未为真时必须翻红"，否则整族用例可以靠一个恒真的收敛器静默通过。评审 B-05 又指出这同一个助手在两份文件里**逐字重复**：一处改了超时契约，另一处会安静地继续断言旧契约，于是它搬进 `tests/fixtures/converge.cjs`（两份引用同一份，`sleep` 留在各自文件里，因为它们各自还用得着别的形状）。
+
+### 四、债务③：同一页两代纤维的归属锁（这一轮唯一的产品代码行为改动）
+
+`lib/client.js` 的材质 `<style>`、壁纸节点、`<html>` 上的水洗标记、对话框 alpha 地板、composer 标记的 `MutationObserver` 与轮询定时器**全是模块作用域**，而长寿命页面上这份 bundle 可能被求值**第二次**（10.5.0 审计里实测到同一 DOM 内两个 `style#dsh-dream-skin-nav-icon`）。两代纤维 = 两份 cleanup，而宿主什么时候跑旧代那份由它决定。顺序若是"新代先 apply、旧代后卸载"，一次无主 teardown 会把**新代刚装好的东西**拆掉——页面掉回宿主默认外观。现在 `apply()` 第一句认领页权（`const owner = claimPageOwner()`，号写在 `window` 上，见下面的 B-A-03），cleanup 只在仍持有时才动手，与 T9 给 nav-icon 钩子的锁同一个形状。
+
+写这一条时才发现**同一债务有第二个实例，而且更坏**：composer 标记的停止既没门控，它那个 `composerMarkerStarted` 闩也是模块作用域且**从不复位**——旧代一停，后续每一代的 `startComposerMarker()` 都在第一行返回，这一页余生都不会再给输入框打标记（issue #50 那套规则从此靠不上）。所以除了门控，`stopComposerMarker()` 现在**连闩一起交还**，并新增"第三代必须能重新 arm"这一腿。
+
+新文件 `tests/client.fiber.test.cjs` 7 条 + `tests/client.fiber.page_scope.test.cjs` 7 条 + 共享夹具 `tests/fixtures/page-sandbox.cjs`（`ctx.effect` **收集** disposer 而不是立即执行、`theme.overrideTokens` **记录**层并在 disposer 调用时标死、`MutationObserver` / `setInterval` / `document` 与 `window` 监听器全部留痕，`evaluate()` 能在**同一个 vm context 里把 bundle 再求值一次**——这才是"bundle 被求值两次"的真实形状）。这一轮的同模型对抗评审（蓝军 B-A 组）对着第一版锁挑出四处，四处都改了并各配反向腿：
+
+- **B-A-03｜页权号不能放在模块里**。前提写的是"bundle 可能被求值两次"，而两次求值就是**两份模块作用域**——一个模块级计数器没法仲裁同一个 `<html>` 属性归谁。现在号写在 `window.__DSH_DREAM_SKIN_PAGE_OWNER__`，`window` 不可达时退回本模块私有（退化成修复前那层弱保证，绝不编造一个持有者）。变异：把读回那句换成"只用模块私有值" → 跨副本那一腿照旧被拆（材质表 2→0、水洗标记被撤回），而同一条用例里 token 层原地不动——**这份不对称就是"共享的状态才需要页面级的锁"的实测理由**，不是修辞。这个仓库在 10.5.x 给 nav-icon 钩子已经记过同一课（CHANGELOG 原文「页面级 armed 位」），本轮是把同一课用到水洗上。
+- **B-A-04｜认领要早于安装**。宿主被允许在新 `apply()` 走到一半时**同步**卸载旧槽位。所以 `claimPageOwner()` 是 `apply()` 第一句，不在任何注入之后。变异：`const owner = readPageOwner()`（迟认领）→ 中途卸载把新代已经装上的材质表拆走（实测 1→0），而水洗标记仍读回 `1`——**伤害是分通道、按时刻的**，所以这里写"新代全丢"会比实测强，实际能证的是"迟认领会丢材质表"。
+- **B-A-01｜刷新调度器不用门控解决**。它的 60s tick 与 `visibilitychange` 监听也是模块句柄：加所有权门只是把"旧代停掉新代的 tick"换成"旧代的 tick 永远停不下来"（页面上留一个仍在按**共享** `localStorage` 配置的壁纸刷新计划走时器的死实例，条件满足时它每过 `hours` 就通过自己那份没人认的 `ctx` 重贴一次壁纸）。现在 `startWallpaperRefreshScheduler()` **返回它这一代创建了哪两个句柄**，cleanup 只释放自己那对，`refreshNotify` 用身份比较（还是我的时候才置空）。两条变异：释放改走模块句柄（= 修复前的形状）→ 新代 tick 与监听被停（实测定时器 2→1、监听 1→0）；改成"什么都不释放"→ 两代的 tick 与监听全都活过各自的 unload（4/2 一路不降）。反面教材也写进用例：**"没有皮肤消失"的症状不会让这类缺陷露头**，因为材质表在下次 apply 会被重画，而定时器不会。
+- **composer 标记那一腿**保持所有权门控（它的观察器与 `started` 闩在同一份模块作用域里只有一份），闩复位与"第三代必须能重新 arm"照旧单独钉。
+- 第一版就立着的三条变异照旧逐条翻红：**① 删掉 `if (!holdsPageOwner(owner)) return;`** → 旧代真的吃掉新代（材质表 0 张、水洗标记被撤回、token 层被 dispose，三件事都是断言而不是描述）；**② 把标记门控换成无条件 `stopComposerMarker()`** → 唯一那个观察器被旧代断开；**③ 删掉闩复位** → 第二代不再建观察器、`live` 恒为 0，"永久失效"这一半被单独钉住。防空洞腿同样齐：owning fiber 仍能全部拆掉（不是"什么都不再拆"），reverse order（旧代先卸载）行为不变。
+
+### 五、债务④：localStorage 写不进去时，不再只掉进黑洞
+
+所有本地写入现在走**同一道门** `localWrite()`：失败仍然不炸宿主（这是对的），但会把**被拒的键名、错误名与时刻**记进 `window.__DSH_DREAM_SKIN_STATUS__.storageError` 并**立刻重发快照**（快照对象是整体替换而非就地改，不重发就可能永远不出现在读数里）；**后续任何一次写入成功就把这条撤掉**（评审 B-01）——字段名、提示行和任何按名读它的工具说的都是"现在存储不健康"，而删掉归零那一版记的是"这一页曾经坏过一次"，开机一次配额抖动就会让快照带着一条已不存在故障直到刷新，那是**伪造的当前观测值**。同时壁纸历史补了**第二把上限**：`WALLPAPER_HISTORY_MAX = 5` 管条数，`WALLPAPER_HISTORY_BUDGET = 2000000` 管字节——2MB 照片 base64 后约 270 万字符，五条就是 ~13MB，远超一个源的常见 5MB 配额。维护机 profile 现读（2026-10-10）：5 条、合计 122,117 字符、其中一条是 115,863 字符的照片——**条数从来不是没爆配额的原因**。剪枝的下限同样重要：`while (keep.length > 1 && …)`，一条**自身**就超预算的壁纸仍被写下去（宁可让 `localWrite` 报失败，也不悄悄丢掉用户正在看的那张）。设置页在壁纸区多一行条件提示（8 语言各一条 `storage.hint`），文案说的是**用户此刻该知道的那半**：「没能写进本地存储，本次会话仍生效，重启后可能回到旧值」。**另一半事实走机读出口而不是文案**——被拒的那个键仍会照常推给宿主的 durable 文件（`~/.dsh/dream-skin.json`），所以持久化的偏好通常并没有丢，这件事由 `tests/client.storage.test.cjs` 第二条钉住、由 `storageError` 供工具读，不写成界面文案（那需要向用户解释三层存储模型，成本大于收益）。
+
+**这一节的三条门是后补的（评审 B-03：出口有门、文案有门，唯独"用户看得到的那一行"没有门）。** 补它 requires 一件夹具层面的事：本套件的每一份沙箱都把 `react/jsx-runtime` stub 成 `jsx: () => 0`，整个 UI 层编译成空操作，所以"渲染了吗"这个问题以前**根本问不出来**。现在 `makeRequire({ nodes })` 把每次 `jsx()/jsxs()` 记成 `{type, props, key}`，`slots.register(desc, Component)` 把宿主签名里的第二个参数留住，用例于是能真的调用壁纸行并检查那一次渲染里有没有提示行——`t` 传的是标记函数，所以只有走翻译器的文本才可能通过（硬编码中文串在这里不红，红的是"没走 i18n"）。本文件 12 条，变异 9 处，逐条实测翻红：**删掉错误记录** / **留记录但不重发快照** / **让 `writeStorage` 绕过这道门** 三条由"被拒写入必须被点名"翻红；**把预算抬到 999999999** 只有字节上限红；**从 `ja` 一个字典里删掉 `storage.hint`** 只有八字典键集 parity 红；**`lastStorageError ?` 换成恒假** → 提示行不出现（静默降级复现）；**换成恒真** → 健康页面也报警（这条是"反向用例必须断言整组结论"的形状：只钉前者会留一条永远显示警告的实现同样过关）；**`keep.length > 1` 改成 `> 0`** → 一条 210 万字符的壁纸被剪成 `[]`（这条必须用**自身超预算**的种子才能与旧写法分开——用"5 条各 60 万字符"那种种子时，新条目本身很小，两种写法都不剪，等于没测）；**删掉成功写入后的归零块** → 之后的写入全部落地、快照仍报"坏了"。边界照实：失败路径是用**真会抛的 `setItem`** 在 VM 沙箱里驱动的；真浏览器配额满这条**没有在浏览器里实测**。
+
+### 六、Roadmap 与文档通道
+
+- **A5 → CI**：`wash:check` 认 `DSH_WASH_STRICT`，缺浏览器 / 缺宿主不再 skip 而是 **exit 4 并点名缺哪一样**；`.github/workflows/ci.yml` 新增 `wash-gate` 作业（宿主版本从 census 现读、第三方共签插件按版本钉死、跑完回读日志确认没有任何 skip 行）。新增 `tests/wash.ci_strict.test.cjs` 12 条（含 5 处 workflow 形状变异）。顺手抓到一个真 bug：CLI 过去**从不读 `DSH_SKIN_CENTER`**，只有显式传参才生效。说明见 `docs/computed-style-gate-in-ci.md`。**"配置好"不等于"跑过"——本条按这条纪律走完了两个状态**：第一次 push 时 `wash-gate` 自己绿了并交出 13 行读数，但整条 workflow 因 `test` 矩阵翻红（红在我方，见 §八），所以没销账；修完自己那半之后 run `38061953959` 四份 `test` + `wash-gate` + `typecheck` 全绿，读数与 `wash cascade OK` 都在、零 skip 行，Roadmap 那条随本次收口**从 8 份 README 删除**。
+- **B6**：`docs/publishing-to-npm.md` 加第八节（发布后从公共 registry 真装一次：临时 profile、读侧同步延迟、冷静期两种行为、桌面 profile 的两条活路、三读数核对）与第九节（桌面用户报"修复没生效"先分诊他实装的版本）。
+- **B7**：8 份 README 与安装技能写清版本号形态——`npm view dsh-dream-skin version` 现查、24h 冷静期会静默装旧版、**老 profile 的 `^9.29.0` 按 semver 到不了 10.x 而 `update` 沿用既有范围**（于是"已是最新"而界面照旧）、桌面 profile 由 Electron 独占管理会被 CLI 硬拒。
+- **重排**：A3（peer 窗口滚动到 `0.3.x`）标为**上游阻塞**——registry 上 `@deepseek-ai/dsh` 的 `latest` 是 `0.2.0-rc.2`、版本列表止于 `0.2.1-alpha.2`，`0.3.x` 从未发布，无目标可对齐；C 组"配置预置 / 策略下发"移入「不做」并写明理由（要动的正是刚被 B1 门锁死的持久化写入优先级）；D 组 localStorage 配额条、B6/B7 完成即删。
+
+### 七、#107：同一份文档里两种口径（本轮开的单，本轮收掉）
+
+`715986f` 把**未验证清单**那条改成「计算样式已采样，真机活页与像素观感未验」，但没回头同步 §会话字号那一整节——于是随 npm 发布的 `docs/desktop-support.md` 里同时存在「`10 px / 22 px` 各零次实测」和「计算样式已采样」。两句各自都算真（一半是像素、一半是计算值），**但没有一句说是哪一半**，读者先看到哪一节就信哪个。本轮做了两件事：
+
+1. **口径同步**：节标题、`:213` 的诚实表述、`:215` 的措辞规则、`:217` 的"要补的实测"四处按文末那条收窄后的说法改写，明确"计算样式极值已采样（2026-10-09，独立夹具，本机实装未动）／真机活页与像素观感 0 次"。
+2. **一条会失败的门**（比改字更要紧）：`tests/desktop.fontscale.test.cjs` 新增 #107.1 / #107.2 两条——同一份文档里"零次实测 / 零次采样"句式与"计算样式已采样"同时在场、而那句话没点名自己说的是哪一半（真机 / 目视 / 像素 / 活页 任一限定词），判红并**点名行号**；反向腿是把手改过的句子原样注入回去（必须红），对照腿是同一句加上"真机目视下"（必须绿）——否则这条门只是禁词表，不是口径检查。#107.2 钉住另一头：删掉"已采样"那条并不能让矛盾合法化，它会被 DATED_ENTRY 那条门单独抓住。
+3. 顺手把门自己的一句陈述改正：它的 finding 过去打印 `0 samples at either extreme`，而现在计算样式那一半有数，改成 `0 live-page observations at either extreme`。**门自己的措辞也在随事实漂**，这是同一种病。
+
+### 八、首轮 CI 翻红：一条新用例把"这台机器没有宿主"当成了"检查失败"
+
+`aa6c36c` 推上去之后 `test (18/20/22/24)` **四份作业同时红**，本机 460/460 全绿。红的是本轮新写的拒绝面用例（`the corner fixture reads its colors out of the shipped bundle, and refuses to invent them`）：它的前半只读 bundle 文本，后半调 `buildFixture()` 需要**已安装的宿主 CSS**，而 `test` 作业从来不装宿主（这个文件里其余 15 条宿主相关用例都按约定挂了 `skip: RUN ? false : skipWhy`）。维护机上有宿主，所以这条只在别人的机器上坏——正是本仓库第 N 次撞到"在我这儿是绿的"。
+
+修法与记账：
+
+1. 拆成两条。**只需 bundle 文本的那半不设门**（它在任何机器上都该跑，包括 CI 的 `test` 作业）；**需要宿主构建 `parts` 的那半**（拒绝面在字段深处，得先有一份真 parts）按本文件既有约定 skip 门控，并把 coexist 那半一起补上（债务①原本只门控了 corner 那一页）。
+2. 用门自己提供的 `DSH_HOST_ROOT` 覆盖，把**整套件**在别人机器的形态下重跑一遍再推：`461 定义 = 442 通过 + 15 具名 skip + 4 宿主组 skip`，`fail 0`。**"环境不具备"与"检查失败"必须是两个出口**（issue #102 立的规矩，这次轮到套件自己的加载期违反它）。
+3. 反向腿实测：把**改动前**的那份文件从 `git show HEAD:tests/wash.cascade.test.cjs` 取出来单独跑。宿主缺失的形态下它 `33 定义 = 18 通过 + 14 具名 skip + 1 失败`，失败正是这条用例；维护机形态下它 `33/33` 全绿（这就是本机从来发现不了的原因）。改后的那份在同样两种形态下是 `34 = 19 通过 + 15 具名 skip + 0 失败` 与 `34/34`。**修前红、修后绿两侧都有读数**，这一条才记为已修。
+
+同时这一轮的 `wash-gate` 作业**第一次在 runner 上跑出了读数**：`Computed-style gate (real engine + real host CSS)` 13 行 JSON 读数 + `wash cascade OK`，严格模式下没有任何 skip 行。那一次整体作业仍随 `test` 一起红，所以 Roadmap A5 **没有当场销账**；修完 §八 那条之后重推，run `38061953959` 六个作业全绿、读数照旧在场，A5 才在随后一次纯文档提交里从 8 份 README 删除。**先等自己那半修好，再销别人能复算的账**。
+
+### 门与账本
+
+回归门 **461/461**（+48 = 四个文件 41（`client.fiber` 7 / `client.fiber.page_scope` 7 / `client.storage` 15 / `wash.ci_strict` 12）+ `wash.cascade` 3（bundle 现读 / 拒绝面 / 活页变异）+ `desktop.fontscale` 2（#107 的口径互斥门与它的反向腿）+ 两份 `waitFor` 反向门各 1；新增与加厚分开记，套件数字不自己解释自己）。质量审计 **228/228**（217 调色 + 11 工艺，门数不变）。`npm run wash:check` 严格模式本机实跑 exit 0、13 行读数；`skin:check` / `host:census:check` / `previews:check` / `repo:eol` 全绿。文档数字由 `tests/docs.numbers.test.cjs` 现场加载整套件数出并核对，不是手抄。**本轮新增变异 19 处，全部是套件里能重跑的用例**（不是"当时手工验过一次"）：`client.fiber` 3 + `client.fiber.page_scope` 4 + `client.storage` 9 + `wash.cascade` 1（corner 活页那条）+ `desktop.fontscale` 2（#107 的互斥门与它的"删掉已采样也不许合法化"腿）。其中"删记录 / 记录但不重发快照 / 绕过单门"三种失守形状并排写在一条用例里，每一条断言的都是**坏行为**，所以哪天代码重新长出这条痕迹、用例会红而不是悄悄通过。套件里另有 `wash.cascade` 旧轮 8 条与 `wash.ci_strict` 的 5 条 workflow 形状变异，每次跑套件都重演。`coexist` 夹具这次只改了颜色来源（现读 + 拿不到就抛），没有新增变异——它原有的那条撤规则变异照旧钉着胜负归属。
+
+### 未验证 / 边界
+
+- **已销账（不再是欠账）**：`wash-gate` CI 作业在 run `38061953959` 上随整条 workflow 一起绿，日志里有 13 行读数 + `wash cascade OK`、零 skip 行，Roadmap A5 随之从 8 份 README 删除。**仍欠的两件事**：这个作业只在 push/PR 上跑、没有每日排程，宿主 CSS 漂移要等到有人改东西才暴露；Ubuntu 镜像缺 Chrome 时的下载路径尚未经过一次"镜像真的没带浏览器"的运行（本机与 runner 目前都有 Chrome，这条路是推测中的可用，不是实测过的可用）。
+- Electron 渲染进程内部 0 次机读（不变）；侧栏列第三层不跟随 canvas token 造成的约 15% 明暗差是 10.9.3 **有意保留**的代价。
+- `storageError` 的浏览器端配额触发未实测；一行超大壁纸仍会被保留（宁可让 `localWrite` 报失败，也不悄悄丢掉用户正在看的那张）。
+- **字节上限是"每把钥匙"的，不是跨键总额的**（评审 B-08）：`WALLPAPER_HISTORY_BUDGET` 量的是 `wallpaper-history` 这一个键序列化后的字符数。壁纸历史本身仍可能和其他键（皮肤包库、主题包导出）一起把源的配额吃满——那时兜底的是 `localWrite` 会点名失败键，而不是提前算总额拒绝写入。跨键总额的估计需要一个能读配额余量的 API，浏览器没有给。
+- **提示行读的是渲染时刻的模块变量，不是订阅**（评审 B-07）：`lastStorageError` 在壁纸行**重渲染**时才会反映出来。宿主不重渲染那一行，用户就看不到新出现的警告——反应式通道是 `__DSH_DREAM_SKIN_STATUS__.storageError`，工具该读那里。之所以不做成订阅：把它塞进 store 需要给每个 store 的 `sync` 都加一条参数，成本大于"打开设置页时那一次渲染已经带上它"。
+- 归属锁改变的是 fiber 生命周期路径，**没有在真页面上做过热重载**——真机上双实例出现与否不由我们决定，所以这一轮的证明全部来自沙箱内的两代 / 两份实例与 17 条变异。
+- **认领之后、安装之中若抛错，这一页就没人认领了**（评审 B-A-02）：`apply()` 第一句 `claimPageOwner()` 之后任何一步抛出，页权号已被推高但那一代不会完成安装，后续 cleanup 全部 refusal。触发路径未证明（`apply()` 里没有一行现在会抛出到宿主——每一步都各自 try/catch），而修它要把 `apply()` 拆成"认领—安装—提交"三段，本轮不做，记为边界。
+- **composer 标记的 `started` 闩与 disposer 的交还次序**（B-A-05 / B-A-06）：`stopComposerMarker()` 先复位再处置，前提是 disposer 不抛——今天的 disposer 只调 `disconnect()`（不可能抛）。`composerMarkerDispose = null` 那一半赋值没有独立用例（观察器句柄与闩的两条变异已覆盖可观察后果）。
+- `refreshNotify` 那句 `if (refreshNotify === myRefreshNotify)` **没有独立变异门**：沙箱里观测不到它的出口（面板同步不经过任何被记录的句子），与它同形的"只在自己的时候放手"两条已被门控（tick 与监听器）。
+- issue 侧的真实状态（**发布这一步现查，不凭上一轮记忆**）：`gh issue list --state open --json number` 在 v10.10.0 打标之后返回 `[]`——**开放数 0**。过程记录：#93 与 #99 于 2026-10-09 关闭（#93 以「计算样式已采样、真机目视另欠」的口径收口，#99 由报告人回执 v10.8.1 不再复现后收口）；本轮开的 **#107**（同一份文档两种口径）在 §七里收口，结论贴在 issue 上后随本版关闭。**下一轮开工前仍需重查**，这一格记录的是 2026-10-10T15:18:16Z 的那个瞬间，不是永久状态。
+## [10.9.3] - 2026-10-09
+
+> **同一个红圈，第二次改判。** 10.9.2 说"标题条画内容列用的那枚 token"，判据说"两者的计算值相等"，412 条用例全绿——而屏幕上那条带子仍然偏浅。本轮的病灶不在产品那一行声明，在**判据比的是声明、不是像素**。
+
+### 取证：先排除"没送达"，再量真页面的层
+
+- **10.9.2 确实在跑**（三条独立证据）：桌面 profile 的 `node_modules/dsh-dream-skin/lib/client.js` 落盘 18:39、应用在 18:49 启动、壳的 HTTP 缓存目录里查不到插件资产的任何副本、从壳自己 serve 的页面现读 `__DSH_DREAM_SKIN_STATUS__ = {build:"10.9.2", status:"ready"}`。所以不需要再怀疑版本没到。
+- **真机层数普查**（在壳 serve 的那个真实页面上，从被着色的元素沿 `parentElement` 走到 `<html>`，逐层读 `backgroundColor` 的 alpha）：
+  - 内容列 = `body(0.4)` + `.centerCol(0.4)` + **列内那层 app root(0.4)** → 合成 alpha **0.784**；
+  - 侧栏列 = `body(0.4)` + `.sidebarCol(0.4)` + 列内 app root(0.4) → 同样 3 层；
+  - 标题条 = `body(0.4)` + `::before(0.4)` → **0.640**。
+- **哨兵实验**（改写 `body` 上的 `--dsw-alias-bg-base` 为 `rgb(1,2,3)`）：内容列三层**全部跟随**，标题条那一层跟随，而**侧栏列的第三层不动**——它读的是另一枚 token，只是当前值恰好相同。这条决定了本版的边界：带子能精确跟住内容列，跟不住侧栏列的那一层。
+- **用报告人自己的截图做独立核对**（这是本轮唯一一份不是本仓库生成的证据）：把那张 3000×1904 的 PNG 按 400px 宽窗口取平均色，沿 y 做竖切——带子内 `R149–160`，紧贴其下的内容列 `R98`、侧栏 `R104–115`。把"每多一层 α=0.4"当模型反解层数差，两处之差正好等于**一层**（代数上 `B−C = 0.4·(W−19)·0.6^k`，与普查的"列比带子多一层"独立吻合）。绝对值对不上模型的地方来自照片本身：那条带子上方的墙面比下面亮，这不是任何覆层能修的，也不是本次的病灶。**所以本版对结果的承诺是"把少掉的那一层补回来"，不是"顶部与页面完全一致"**——壁纸自己在竖直方向就有明暗渐变，一条平涂带子跟不住一张照片。
+- 顺带订正一处本轮自己踩到的读法：第一次哨兵实验写在 `:root` 上，三层**一个都没动**——因为插件是把 token 发布在 **`body` 的行内样式**上，`:root` 的声明离目标元素更远、被 `body` 覆盖。**"改了没反应"不等于"没跟随"**，得改在正确的继承距离上。
+
+### 修复
+
+- **标题条把同一枚 token 画两层**：`background: linear-gradient(var(--dsw-alias-bg-base), var(--dsw-alias-bg-base)) var(--dsw-alias-bg-base) !important`——仍是一条声明、仍是 `background` 简写、仍带 `!important`，盒子几何与 `-webkit-app-region: drag` 一字未动。合成后与两列同为 0.784。
+- 语法不是照抄的：先在壳 serve 的真实页面上用同特异度的探针规则实测过，计算值确实是"颜色层 + 一层实心渐变"两叠（`background-image: linear-gradient(rgba(19,17,22,0.4), rgba(19,17,22,0.4))` 且 `background-color` 同值），才写进发货代码。
+
+### 门
+
+- **`caption-matches-content` → `caption-composites-like-content`**：比较对象从"两个元素各自的 `backgroundColor`"换成"**沿祖先链把每一层 alpha 合成出来的结果**"。声明相等是必要条件，不是充分条件——这一句就是本轮的全部教训。
+- 新增两条防空洞，各自有各自的失败模式：**`caption-stack-is-column-deep`**（夹具的内容列必须真有 ≥3 层，即真机量到的深度；否则"把夹具改浅"就能让等式白拿）与 **`caption-comparison-is-alpha-sensitive`**（夹具的 canvas token 必须半透明；实心头像下任何层数都合成成同一个颜色，等式失去可失败性）。
+- **夹具本身被改得更像真页面**，不是更好过：补上列内那层 app root、`:root` 的 token 从 `#101018`（实心）改成 `rgba(16,16,24,.4)`（半透明）、并给 `body` 加上真页面上确实存在的那层底。此前 `stackOf` 还有一处读法错误——伪元素的祖先链从**父元素**开始走，漏掉了宿主元素自己的背景，plain 态因此少算一层。
+- **变异账本**（活页那半边用真实引擎重演、夹具只在内存里改；形状那半边在**隔离副本树**改 `lib/client.js` 后跑 craft + smoke，工作文件不动。逐条实测，下面每条红的是什么门都写清楚）：**① 换回 10.9.1 的 `transparent`** → 引擎只有合成那条红（盒子 / 拖拽 / 几何 / 图片 / 复原全绿），craft + smoke 也红；**② 换回 10.9.2 的单层写法** → 引擎只有合成那条红，且同一次读数当场证明 `stripFill === centerColFill` **在这个坏页面上成立**（把"上一版为什么全绿"写成断言而不是段落）；这一条 **craft 是绿的**（白名单**故意**放行单层——层数不是形状问题），smoke 虽然红但**理由是错的**（它比的是整条声明字符串，任何改动都会红，不是"少一层"）。**所以全仓库只有这一行是"因为少了一层"而红的**，这句话必须写在断言旁边，否则下一次改判会误以为形状门兜得住。**③ 整条规则删掉** → 引擎只有合成那条红，craft（"没有为 `::before` 门控的规则"）+ smoke 各自红；**④ 两侧同时退平一层**（带子画一层 + 列内那层 root 撤掉，两处合成值重新相等）→ **只有**深度那条红，等式照样绿——这条就是 `caption-stack-is-column-deep` 存在的全部理由；**⑤ token 换回实心** → **只有**敏感性那条红（三层与一层合成成同一个颜色）；**⑥ 三条形状变异分开记**：加第二条声明（`border-radius`）→ craft + smoke 红、**活页全绿**；加 `content: none` → craft + smoke 红，活页也红但红在 `caption-box-alive`（盒子不再生成）而不是合成那条；摘掉 `!important` → craft + smoke 红、**活页照常绿**（我方 (0,3,3) 压过宿主 (0,2,1)，flag 挡的是行内 `style` 那看不见的一格，与 10.9.1 同结论）。**负向对照 Ⓧ 把 token 换成硬写颜色 `rgba(19,17,22,.4)`** → craft（白名单）+ smoke 红——这条必须在账本里，因为它是白名单唯一真正的功能。
+- 工艺门的白名单收**四种**值（`transparent` / `none` / 单层 token / **双层 token 简写**），"恰好一条声明、属性名必须是 `background`"两条照旧承重；**单层写法仍然被工艺门放行**，这是有意的：门只管形状，层数对不对归引擎管——把决定写进形状门正是 10.9.2 翻过的车。
+- 回归门 **412 → 413**（+1：那条"退回 10.9.2 单层写法"的引擎变异门；`caption-matches-content` 改名换判据、`center-column-paints` 与 `caption-image-cleared`→`caption-image-is-our-token` 都是既有断言换形状，不计新增）。质量审计 **228/228**（217 调色 + 11 工艺，门数不变）。
+
+### 未验证 / 边界
+
+- **10.9.3 的像素效果 0 次目视**：本轮的依据是"合成值相等"这条量出来的关系 + 真机层数普查，**不是**"我看过了，现在好看了"。
+- **2026-10-10 追记：上一条已过期。** 报告人在官方 DSH Desktop 上目视该带子并回执「现在好了，我看到已经正常了」——10.9.3 像素效果的**第一次目视**。送达链当场排除：桌面 profile 的 `node_modules/dsh-dream-skin/lib/client.js` 落盘 `2026-10-09T11:57:09Z`（本地 19:57:09）、`PLUGIN_BUILD="10.9.3"`、两层写法在该安装副本里在场、profile 依赖范围已从 `^9.29.0` 抬到 `^10.9.3`，而 `DeepSeek Harness` 进程启动于 `2026-10-10 19:25:01`（**比落盘晚约 23.5 小时**）。**仍然没有升格的不是这一眼**：Electron 渲染进程内部 0 次机读，`docs/desktop-support.md` 那一格的评价照旧是"预期可加载"；进程时刻取自当晚那一次运行、撰写时应用已关闭，可复现的是落盘那一半（mtime / `PLUGIN_BUILD` / 声明在场 / 依赖范围）。
+- 侧栏列的第三层不跟随 canvas token（哨兵实测），所以滑杆推到极端时，带子左端约 15% 仍可能与侧栏本体有轻微明暗差。本版选择跟内容列（宽度约 85%、且两次回执都指向它）。若回执说这一处成问题，下一步是**分侧**（一条带子两种底），不是再猜一次默认值。
+- 层数是**量出来的常量**：真页面今天恰好是 3 层。宿主哪天把内层 root 撤掉，深度那条判据会红——那时要重做普查，而不是把判据改松。
+
+
 ## [10.9.2] - 2026-10-09
 
 > **同一个问题，第二种答案。** 10.9.1 把 Windows 标题条的水洗态处理成"透出壁纸"，报告人装上 10.9.1、重新设了壁纸，截图回来的仍是当初那句"顶上一条和页面主题不一致"。本轮先量清楚"到底是没修，还是修完之后剩下的代价"，再改判，并把判据的形状一起换掉——因为**上一版能通过所有门，恰恰是因为那些门断言的是那个决定本身**。

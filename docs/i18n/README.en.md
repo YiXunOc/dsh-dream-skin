@@ -72,7 +72,7 @@ The two ways are layered and independent: a preset decides the "material &amp; b
   </tr>
 </table>
 
-> Light & dark both covered: `mist`, `ivory` and `rose` are light themes, the rest are dark. Not into presets? See **Way #2** below. Each preset also ships its own tuned defaults (glow opacity / blur, sidebar & composer transparency, dialog opacity, glass material): switching skins retunes every value you have not set yourself, and all 8 presets pass 228 measurable quality gates (217 palette + 11 craft) (OKLCH elevation ladder, WCAG 2.1 + APCA text contrast, signal-hue separation, cross-skin distinctiveness).
+> Light & dark both covered: `mist`, `ivory` and `rose` are light themes, the rest are dark. Not into presets? See **Way #2** below. Each preset also ships its own tuned defaults (glow opacity / blur, sidebar & composer transparency, dialog opacity, glass material): switching skins retunes every value you have not set yourself, and all 8 presets pass 229 measurable quality gates (217 palette + 12 craft) (OKLCH elevation ladder, WCAG 2.1 + APCA text contrast, signal-hue separation, cross-skin distinctiveness).
 
 ---
 
@@ -196,6 +196,9 @@ dsh web
 ```
 
 > Installs the published npm package — no cloning. If `dsh plugin add` reports a workspace error, append `-w`.
+> Write the version number out in two situations (`npm view dsh-dream-skin version` gives it to you on the spot): **within 24 hours of a release**
+> (pnpm's cooldown silently installs an older build), and **when upgrading an old profile from the 9.x era** (`^9.29.0` can never reach 10.x)
+> — see the "Install" and "Update" sections below.
 
 ## 📦 Install
 
@@ -207,6 +210,10 @@ persisted to disk and recover after restart).
 ```sh
 dsh plugin --profile web add dsh-dream-skin
 ```
+
+> **Within 24 hours of a release, pin the version number explicitly**: `dsh plugin --profile web add dsh-dream-skin@<latest version>`
+> (look the number up on the spot with `npm view dsh-dream-skin version`). The desktop is a separate case: its profile is managed
+> **exclusively by the Electron app** and the CLI hard-rejects it — the path that actually works is in [docs/desktop-support.md](../desktop-support.md).
 
 ### Option B: From GitHub (pinned to a verified commit)
 
@@ -262,6 +269,17 @@ dsh web   # restart to pick it up
 > freshly published release. In the profile dir run:
 > `pnpm add dsh-dream-skin@latest --config.minimumReleaseAge=0` to force it.
 
+> **On an old profile, use `add` with an explicit version instead of counting on `update`**: `update` reuses the **dependency range already written in
+> `package.json`**, and a `dsh-dream-skin: ^9.29.0` from the 9.x era can never reach 10.x under semver (a caret only floats inside one major version),
+> so `update` reports "already up to date" while the UI stays old. To rewrite that dependency:
+>
+> ```sh
+> dsh plugin --profile web add dsh-dream-skin@<latest version>   # npm view dsh-dream-skin version looks the number up on the spot
+> ```
+>
+> This is not a new defect, it is **an old fix that never arrived** — when triaging "I clearly updated but nothing changed", first check the version
+> actually installed; the steps are in [docs/publishing-to-npm.md](../publishing-to-npm.md), section 9.
+
 **Uninstall:**
 
 ```sh
@@ -278,12 +296,15 @@ dsh web   # restores the official appearance
 | DeepSeek Harness (`dsh`) | **One build for two host generations**: stable `0.1.0-rc.6` / `0.1.1-rc.x` (peers pinned to `^0.1.0-rc.6`) and DSH master (post-split module table). **Skin vanished after a host upgrade while the plugin still shows as installed?** The peer window most likely made the host skip the whole bundle — emergency escape: `dsh plugin allow-version dsh-dream-skin@<version> <host runtime version>` (an **explicit override at your own risk** that force-admits an untested combination, not a recommended practice); symptom triage and full steps in [docs/desktop-support.md](../desktop-support.md) |
 | Node.js | `>=18` |
 | Browser | modern Chromium / WebKit (native CSS variables & `matchMedia`) |
-| Desktop | **Third-party DSH Desktop shell:** adapted and verified on real hardware (issues #50/#51/#55). **Official DSH Desktop:** the evidence supports "**expected to load**", not "supported" — it rests on two static facts (same Electron front-end; the `dsh.client.platform = "web"` we declare matches all 21 client packages the host ships). Its profile directory and install command have **never** been verified on this machine, so this document gives **no** copy-pasteable desktop install command. <!-- desktop-claim: load-expected-unverified -->When adding the plugin, the `--profile` value must be a template name the host **itself** ships; the profile some third-party docs teach does not exist there, and copying it installs into an empty shell profile (you see nothing after a restart). Evidence in **[docs/desktop-support.md](../desktop-support.md)** → "official desktop: pending verification". Full anchor list / security boundary / verified-unverified matrix: same document |
+| Desktop | **Third-party DSH Desktop shell:** adapted and verified on real hardware (issues #50/#51/#55). **Official DSH Desktop:** the evidence supports "**expected to load**", not "supported" — it rests on two static facts (same Electron front-end; the `dsh.client.platform = "web"` we declare matches all 21 client packages the host ships). Its profile directory and the fact that the shell loads this plugin **have** been observed on this machine (installed into `~/.dsh/profiles/desktop`, loaded after the user restarted the shell, our stylesheet read on the live page — see `docs/publishing-to-npm.md` §8.4 and `docs/desktop-support.md`), but persistence of the saved settings across restarts has **never** been verified on this machine, so this document gives **no** copy-pasteable desktop install command. <!-- desktop-claim: load-expected-unverified -->When adding the plugin, the `--profile` value must be a template name the host **itself** ships; the profile some third-party docs teach does not exist there, and copying it installs into an empty shell profile (you see nothing after a restart). Evidence in **[docs/desktop-support.md](../desktop-support.md)** → "official desktop: pending verification". Full anchor list / security boundary / verified-unverified matrix: same document |
 
 > When upgrading DSH, bump the peerDependencies in `package.json` accordingly.
 
 ---
 
+
+<details>
+<summary><b>How it works / Persistence notes / Developing, extending themes (click to expand)</b></summary>
 ## ⚙️ How it works
 
 DSH's theme system is token-based: the web shell ships `--dsw-*` design tokens, and `ThemeRuntime` lets third-party
@@ -352,6 +373,8 @@ seeds (`react`, `react/jsx-runtime`, …) and registered client bundles (`@deeps
 - **Validate**: `npm test` (VM smoke tests covering factory eval, `apply()`, and pack import/persistence).
 - **Repaint**: reference the `--dsw-alias-*` tokens (full contract in [`docs/themes-spec.md`](../../docs/themes-spec.md)).
 
+
+</details>
 ## 📌 Roadmap
 
 > **This table lists unfinished work only.** Anything already shipped lives in the Features section above and in [CHANGELOG.md](../../CHANGELOG.md) — keeping it in two places always drifts, and this project has already drifted once. This table translates the Roadmap of the Chinese `README.md`, which stays the source of truth.
@@ -362,44 +385,36 @@ seeds (`react`, `react/jsx-runtime`, …) and registered client bundles (`@deeps
 *Why: measured on `0.2.0-rc.1`, 4 of the 6 host anchor groups drifted — 3 confirmed hash re-rolls, plus 1 (the `lXshSW_*` group) that is host CSS which still exists and whose surface simply is not mounted (split out as `notMounted` since 10.5.0); from the user's side, issue #62 looked like "my skins all disappeared overnight".*
 
 - [ ] **M** Drop the last host hashed class names: move the remaining decorative rules (sidebar / file panel) onto our own `data-dsh-dream-skin-*` markers — composer and nav-icon already prove that path works
-      — acceptance: the drift probe reports `drifted: [] && pending: false` on 0.2.x
-- [ ] **S** Turn "pre-check against a host rc" into a fixed release step: the day a new rc lands, run the compatibility table once and one real profile load
-- [ ] **M** Roll the peer window up to `0.3.x` — **only once it has been verified**; if it stays closed, write "not supported" in the docs instead of leaving a silent skip
+      — acceptance: **both layers must pass** – ① the static pairing gate `tests/host.frosthooks.test.cjs` is green: every rule still betting on a host build hash carries a hash-free anchor in the same selector, and that anchor is measured in both channels' shipped bytes; ② the drift probe reports `drifted: [] && notMounted: [] && pending: false` on 0.2.x. **10.13.0 takes `channelAbsent` out of the pass/fail string and reads it as a fact only**: a criterion every absence can satisfy by "explaining" itself is prose standing in for evidence; with the static gate, removing an anchor goes red on the spot, while "this hash is absent on that channel" is still reported in `anchors`. **Reading only `drifted` empty is still not enough** (10.8.0's `retired` and 10.12.1's `channelAbsent` both move explained absences out of `drifted`). Reading guide: `docs/desktop-support.md`, section `消费判读`
+- [ ] **M** Roll the peer window up to `0.3.x` — **blocked upstream, not on our side**: as of 2026-10-10 the registry's `latest` for `@deepseek-ai/dsh` is `0.2.0-rc.2` and the version list ends at `0.2.1-alpha.2`; `0.3.x` has never been published (`npm view @deepseek-ai/dsh versions --json`). With no target version to align to, this item can be neither started nor verified — the current peer window, exactly as stated in the compatibility table above, already covers **every** host version published to date.
+      — acceptance: only once the host really ships 0.3.x, run `npm run host:preflight -- --profile-load` (those two halves ARE that command today), and widen the window only if both pass; if it stays closed, write "not supported" in the docs instead of leaving a silent skip
 - [ ] **S** The drift probe cannot cover mount-on-demand surfaces: the question and approval cards only enter the DOM once a conversation actually asks something, so a boot-time sampling ladder would report them as permanently drifted — 10.5.0 keeps them out of the probe on purpose
       — acceptance: after one real question, `anchors` reports hit / miss for both functional anchors, while a freshly opened page still reads `drifted: []`
-- [ ] **M** Move the mechanism-level evidence into CI: the computed-style gate (`npm run wash:check`) depends on this maintenance machine's Chrome plus the CSS of the locally installed host, so its four computed-style cases skip in CI — today only one person can recompute the "the mechanism really fires" half of the proof; while there, replace the hand-copied host class names in the fixture with anchors supplied by the live DOM / the `scripts/host-consumers.cjs` census
-      — acceptance: the CI log shows **readings** for those four cases instead of a skip reason; a missing browser or missing host fails with a non-zero exit naming which one, never a silent pass
 
 ### B. Publishing and the install channel
 
 *Why: on 2026-09-29 installs were rejected on the official Desktop `0.2.0-rc.2`, while the maintenance machine uses a `link:` workspace install — **this class of problem is invisible under a link install**.*
 
-- [ ] **S** Add one step to the release checklist: "actually install it from the registry once" (fresh profile + exact version + `--dump-config` to confirm the loader entry) → write it into `docs/publishing-to-npm.md`
-- [ ] **S** Put the exact version number in every install / update command (three places: README, the skill, the desktop docs), and explain pnpm's 24-hour cooldown
 - [ ] **M** Document an intranet / offline distribution path (the Release tarball mechanism already exists; the copy-pasteable steps don't) | PR-welcome
 
 ### C. Desktop operations
 
 *Why: after the official Desktop release a new kind of user showed up — one person looking after a batch of machines. Real contact with that profile is still thin, so take the two cheap items first instead of paving the whole road at once.*
 
-- [ ] **S** Add a schema version field to the state file (upgrades currently rely on tolerant reading; a forward-compatibility drill has never been run)
-- [ ] **M** A machine-readable answer to "did the skin actually take effect": a field-by-field reading guide for `$DSH_HOME/dream-skin.json` and `__DSH_DREAM_SKIN_STATUS__`, so a script can decide instead of a person opening the console
 - [ ] **M** A batch deployment guide (profile directory layout, `link:` vs registry installs, the semantics of `compatibility.json` exemption keys, dynamic ports)
-- [ ] **L** Config presets / policy push (an admin drops in a default skin that is active on first launch) — placeholder, most likely never built
 
 ### D. Product experience
 
 *Why: this is what users see first. But every real report from these two days (#61 / #62) was about reliability, not experience, so the whole group sits behind A and B.*
 
 - [ ] **M** Flicker-free first paint (FOUC): **measure first** — the real window from the first frame to `apply()` completing decides the approach. No measurement, no work.
-- [ ] **S** An empty-state hint for linked wallpapers: when "Image URL" is selected but no link has been pasted yet, that mode paints no background, and nothing in the UI explains "why did my background disappear" (one line per language across all 8 — slip it into the next feature release)
-- [ ] **S** Measure the `localStorage` quota: does wallpaper history growth silently squeeze persistence out (a failed write currently **degrades silently**)
 - [ ] **M** Community theme gallery — **settle the governance rules before writing code**. Verified: a theme pack payload contains no image fields whatsoever (tokens + accent colour + metadata only), so submissions carry no image-copyright risk by construction; the entire cost is review burden | PR-welcome
 
 ### E. Won't do / pull requests only
 
 - **Rotating several wallpaper URLs** (a side observation from issue #61): the reporter's server-side setup (a random image per request, pre-composited to the screen ratio) already reaches the same effect, while doing it inside the plugin is the most expensive change on this table and the one that leaves the deepest semantic debt.
 - **An online palette / theme-preview Studio**: that is a standalone site, not a plugin capability, and it overlaps with the community theme gallery while costing more.
+- **Config presets / policy push** (an admin drops in a default skin that is active on first launch; this was the placeholder in group C and moved here after the 2026-10-10 decision): what this item would change is the **write precedence** of persistence — the factory seed now has to yield to the user's durable file (the B1 gate from 10.6.1 exists to pin exactly that), and bolting on one more "admin defaults" layer means cramming a fourth source into a three-state behaviour that tests only just locked down. And the "one person managing a batch of machines" profile still has no real contact point, so we don't do it; it reopens once batch users appear.
 - **Anything that injects into or patches the host installer / binary**: it contradicts the "official extension points only" positioning head-on — **never**.
 
 ---
